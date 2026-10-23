@@ -43,7 +43,8 @@ rose-attendance/
 │   └── tls/            # محل گواهی‌های TLS (هرگز کامیت نشود)
 ├── docs/
 │   ├── REQUIREMENTS.md # سند جامع نیازمندی‌ها، معماری و استقرار (نسخه ۲٫۱)
-│   └── REQUIREMENTS.pdf# نسخه رسمی PDF سند
+│   ├── REQUIREMENTS.pdf# نسخه رسمی PDF سند
+│   └── analysis/       # فاز ۱: مدل داده، قواعد محاسبه و طراحی صفحات
 ├── compose.yml         # استقرار تک‌میزبانی: db, redis, migrate, api, worker, scheduler, gateway
 ├── .env.example        # قالب تنظیمات محیط
 └── .gitignore
@@ -77,6 +78,7 @@ docker compose ps
 - **[سند جامع نیازمندی‌ها، معماری و استقرار (نسخه ۲٫۱)](docs/REQUIREMENTS.md)** — مرجع رسمی پروژه؛ شامل نیازمندی‌های کسب‌وکار، سیاست داده، معماری Docker، API و امنیت و فازهای اجرا.
 - **[نسخه PDF سند](docs/REQUIREMENTS.pdf)** — نسخه رسمی قابل چاپ و امضا.
 - **[موارد تصویب‌شده (بخش ۳۴)](docs/REQUIREMENTS.md#۳۴-موارد-تصویب‌شده-نسخه-۲۱)** — ده تصمیم قطعی‌شده با تأیید کارفرما در نسخه ۲٫۱؛ مبنای طراحی و قرارداد.
+- **[فاز ۱ ـ تحلیل نهایی](docs/analysis/README.md)** — [مدل داده نهایی و ERD](docs/analysis/01-data-model.md) · [DDL اسکلت PostgreSQL](docs/analysis/schema.sql) · [قواعد محاسبه کارکرد](docs/analysis/02-calculation-rules.md) · [طراحی صفحات Android و PWA](docs/analysis/03-screens.md).
 
 ## نکته امنیتی
 
