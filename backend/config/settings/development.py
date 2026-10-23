@@ -24,6 +24,9 @@ DATABASES = {
 
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
+# In-memory channel layer — no Redis needed for local runs and tests.
+CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+
 CORS_ALLOW_ALL_ORIGINS = True
 
 CELERY_TASK_ALWAYS_EAGER = True

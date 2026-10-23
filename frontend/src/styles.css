@@ -586,3 +586,36 @@ select:focus {
 .bottom-nav .nav-tab span {
   font-size: 0.68rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Live notification toast (WebSocket) + personnel import page
+--------------------------------------------------------------------------- */
+.toast {
+  position: fixed;
+  inset-inline: 16px;
+  bottom: 84px;
+  z-index: 60;
+  background: #23272f;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  font-size: 14px;
+  text-align: right;
+  animation: toast-in 0.25s ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.import-grid { display: grid; gap: 12px; }
+.import-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.import-error { color: #b3261e; font-size: 13px; margin: 0; }
+.field-row.checkbox { display: flex; align-items: center; gap: 8px; }
+.stat-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.err-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+.err-table th, .err-table td { text-align: right; padding: 6px 8px; border-bottom: 1px solid #eee2d9; }
+.guide-row { display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid #f2eae2; }
+.guide-row:last-child { border-bottom: none; }

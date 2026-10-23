@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 
+from django.conf import settings
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.exceptions import AuthenticationFailed
@@ -11,8 +13,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from django.conf import settings
-
+from .importer import ImportFormatError, build_template, import_employees
 from .models import DeviceSession, User
 
 
@@ -149,3 +150,48 @@ class MeView(APIView):
                 ],
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# Bulk personnel import — HR/ADMIN only (phase-3 item: بارگذاری Excel)
+# ---------------------------------------------------------------------------
+class PersonnelImportView(APIView):
+    """POST /api/v1/people/import/ — multipart xlsx; form field dry_run=true."""
+
+    throttle_scope = "import"
+
+    def post(self, request):
+        user: User = request.user
+        if not (user.is_superuser or user.has_role("HR") or user.has_role("ADMIN")):
+            return Response(
+                {"detail": "این عملیات مخصوص منابع انسانی است.", "code": "FORBIDDEN"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response(
+                {"detail": "فایل xlsx الزامی است.", "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        dry_run = str(request.data.get("dry_run", "")).lower() in {"1", "true", "yes"}
+        try:
+            report = import_employees(upload.read(), dry_run=dry_run)
+        except ImportFormatError as exc:
+            return Response(
+                {"detail": str(exc), "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(report)
+
+
+class PersonnelImportTemplateView(APIView):
+    """GET /api/v1/people/import/template/ — xlsx template download."""
+
+    def get(self, request):
+        payload = build_template()
+        response = HttpResponse(
+            payload,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="personnel-import-template.xlsx"'
+        return response

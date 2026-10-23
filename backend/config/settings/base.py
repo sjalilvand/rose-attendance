@@ -12,6 +12,7 @@ which runs at startup:
 - UPLOAD_MAX_MB               default 10
 - LOCATION_MAX_ACCURACY_M     default 100  (LOW_ACCURACY boundary, section 7)
 """
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -32,6 +33,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
+    "channels",
     # Project apps
     "apps.core",
     "apps.orgs",
@@ -76,6 +78,19 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
+# ---------------------------------------------------------------------------
+# Channels — live WebSocket notifications (messaging increment, section 21).
+# Redis DB 1 keeps the channel layer separate from the Celery broker (DB 0).
+# ---------------------------------------------------------------------------
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [os.environ.get("CHANNEL_REDIS_URL", "redis://redis:6379/1")],
+        },
+    }
+}
+
 AUTH_USER_MODEL = "people.User"
 
 # ---------------------------------------------------------------------------
@@ -111,6 +126,7 @@ REST_FRAMEWORK = {
         "punch": "60/minute",   # normal punch cadence per user
         "sync": "20/minute",    # offline batch sync per user
         "auth": "30/minute",    # token issuance (brute-force backstop)
+        "import": "10/minute",  # bulk personnel import (HR/ADMIN)
     },
 }
 

@@ -442,3 +442,58 @@ export function approveOvertime(id: number): Promise<{ id: number; status: strin
 export function fetchManagerBoard(date: string): Promise<{ date: string; count: number; results: BoardRow[] }> {
   return apiFetch(`/reports/manager-board/?date=${encodeURIComponent(date)}`)
 }
+
+// ---------------------------------------------------------------------------
+// Personnel bulk import (HR/ADMIN) — multipart xlsx upload + template
+// ---------------------------------------------------------------------------
+export interface ImportReport {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  errors: { row: number; personnel_code: string; message: string }[]
+  dry_run: boolean
+}
+
+export async function importPersonnel(file: File, dryRun: boolean): Promise<ImportReport> {
+  const token = getAccessToken()
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const form = new FormData()
+  form.append('file', file)
+  form.append('dry_run', dryRun ? 'true' : 'false')
+  let res: Response
+  try {
+    res = await fetch(`${BASE}/people/import/`, { method: 'POST', headers, body: form })
+  } catch {
+    throw new ApiError(0, 'network-unreachable')
+  }
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      const data = (await res.json()) as { detail?: string }
+      detail = data.detail ?? detail
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, detail)
+  }
+  return (await res.json()) as ImportReport
+}
+
+export async function downloadImportTemplate(): Promise<void> {
+  const token = getAccessToken()
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(`${BASE}/people/import/template/`, { headers })
+  if (!res.ok) throw new ApiError(res.status, 'دانلود قالب ناموفق بود.')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'personnel-import-template.xlsx'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}

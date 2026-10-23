@@ -28,7 +28,7 @@ python3 -m venv /path/to/venv && source /path/to/venv/bin/activate
 pip install -r requirements.in          # برای توسعه
 python manage.py migrate
 python manage.py createsuperuser
-python manage.py test                   # ۷۱ تست خط لوله تردد و محاسبات
+python manage.py test                   # ۱۱۰ تست خط لوله تردد، محاسبات، درخواست‌ها، ورود گروهی و WebSocket
 python manage.py runserver
 ```
 
@@ -41,6 +41,8 @@ python manage.py runserver
 | `/api/v1/auth/token/` | POST | ورود JWT + قفل حساب پس از ۵ خطا (۱۵ دقیقه) |
 | `/api/v1/auth/token/refresh/` | POST | تمدید توکن |
 | `/api/v1/me/` | GET | پروفایل + نقش‌ها |
+| `/api/v1/people/import/` | POST | بارگذاری گروهی پرسنل (xlsx) — HR/ADMIN؛ form: `file`، `dry_run` |
+| `/api/v1/people/import/template/` | GET | دریافت قالب xlsx ورود گروهی |
 | `/api/v1/time/` | GET | زمان سرور برای سنجش افست ساعت دستگاه (CLOCK_SKEW) |
 | `/api/v1/attendance/events/punch/` | POST | ثبت تردد آنلاین (idempotent با `event_uuid`) |
 | `/api/v1/attendance/events/sync/` | POST | همگام‌سازی دسته آفلاین (≤ `SYNC_MAX_BATCH`=۱۰۰) |

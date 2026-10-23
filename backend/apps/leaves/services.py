@@ -225,6 +225,22 @@ def decide_segment(
         request_obj = segment.leave_request or segment.mission_request
         compose_overall(request_obj)
     _refresh_summary(segment)
+
+    from apps.messaging.services import notify_employee
+
+    notify_employee(
+        employee_id=request_obj.employee_id,
+        kind="REQUEST_DECISION",
+        title=(
+            "درخواست شما تأیید شد" if action == ApprovalAction.APPROVE else "درخواست شما رد شد"
+        ),
+        payload={
+            "request_kind": "LEAVE" if segment.leave_request_id else "MISSION",
+            "request_id": request_obj.id,
+            "segment_id": segment.id,
+            "action": action,
+        },
+    )
     return segment
 
 

@@ -10,6 +10,7 @@ import HistoryPage from './pages/HistoryPage'
 import SummaryPage from './pages/SummaryPage'
 import RequestsPage from './pages/RequestsPage'
 import ApprovalsPage from './pages/ApprovalsPage'
+import ImportPage from './pages/ImportPage'
 import SettingsPage from './pages/SettingsPage'
 import './styles.css'
 
@@ -77,6 +78,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ApprovalsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/import"
+        element={
+          <RequireAuth>
+            <ImportPage />
           </RequireAuth>
         }
       />

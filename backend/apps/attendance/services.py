@@ -403,4 +403,13 @@ def approve_review(*, event: AttendanceEvent, decided_by, corrected_time: dt.dat
         decided_by=decided_by,
     )
     rebuild_pairings(event.employee_id, event.branch_id)
+
+    from apps.messaging.services import notify_employee
+
+    notify_employee(
+        employee_id=event.employee_id,
+        kind="REVIEW_RESOLVED",
+        title="تردد نیازمند رسیدگی شما تأیید شد",
+        payload={"event_id": event.id, "effective_time": corrected_time.isoformat()},
+    )
     return event

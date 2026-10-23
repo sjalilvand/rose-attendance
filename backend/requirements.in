@@ -13,3 +13,6 @@ gunicorn>=23.0
 uvicorn>=0.37
 uvicorn-worker>=0.4
 jdatetime>=5.2
+channels>=4.2
+channels-redis>=4.1
+openpyxl>=3.1

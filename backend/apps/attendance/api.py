@@ -526,4 +526,17 @@ class OvertimeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         # decision date — a Mehr overtime approved in Aban updates Mehr.
         jy, jm = jalali_period_of(proposal.shift_date)
         recompute_month_summary(proposal.employee_id, proposal.branch_id, jy, jm)
+
+        from apps.messaging.services import notify_employee
+
+        notify_employee(
+            employee_id=proposal.employee_id,
+            kind="OVERTIME_DECISION",
+            title="پیشنهاد اضافه‌کاری شما تأیید شد",
+            payload={
+                "proposal_id": proposal.id,
+                "approved_minutes": approved,
+                "shift_date": proposal.shift_date.isoformat(),
+            },
+        )
         return Response({"id": proposal.id, "status": proposal.status, "approved_minutes": approved})

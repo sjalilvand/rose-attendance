@@ -11,7 +11,13 @@ from apps.attendance.api import (
     ReviewQueueViewSet,
 )
 from apps.leaves.api import LeaveTypeViewSet, RequestQueueViewSet, RequestsViewSet
-from apps.people.api import MeView, TokenObtainPairWithLockoutView, TokenRefreshView
+from apps.people.api import (
+    MeView,
+    PersonnelImportTemplateView,
+    PersonnelImportView,
+    TokenObtainPairWithLockoutView,
+    TokenRefreshView,
+)
 from apps.reports.api import ManagerBoardViewSet, MonthlySummaryViewSet
 from apps.ops.api import HealthView
 
@@ -31,6 +37,8 @@ api_v1 = [
     path("auth/token/", TokenObtainPairWithLockoutView.as_view(), name="token-obtain-pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("me/", MeView.as_view(), name="me"),
+    path("people/import/", PersonnelImportView.as_view(), name="people-import"),
+    path("people/import/template/", PersonnelImportTemplateView.as_view(), name="people-import-template"),
     path("health/", HealthView.as_view(), name="health"),
 ]
 
