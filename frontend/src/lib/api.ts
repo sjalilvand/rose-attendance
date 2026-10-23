@@ -121,6 +121,7 @@ export interface BranchInfo {
 export interface MeInfo {
   username: string
   server_time: string
+  /** null برای کاربران سیستمی مثل superuser که پروندهٔ پرسنلی ندارند */
   employee: {
     id: number
     personnel_code: string
@@ -129,7 +130,7 @@ export interface MeInfo {
     full_name: string
     employment_status: string
     home_branch_id: number | null
-  }
+  } | null
   roles: string[]
   branches: BranchInfo[]
 }
@@ -137,7 +138,8 @@ export interface MeInfo {
 export interface TokenResponse {
   access: string
   refresh: string
-  personnel_code: string
+  /** null برای اکانت ادمین بدون پروندهٔ پرسنلی */
+  personnel_code: string | null
   full_name: string
   roles: string[]
 }

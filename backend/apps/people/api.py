@@ -63,9 +63,15 @@ class TokenObtainPairWithLockoutSerializer(TokenObtainPairSerializer):
         data.update(
             {
                 "employee_id": user.employee_id,
-                "personnel_code": user.employee.personnel_code,
-                "full_name": user.employee.full_name,
-                "roles": user.active_role_codes(),
+                "personnel_code": (
+                    user.employee.personnel_code if user.employee_id else None
+                ),
+                "full_name": (
+                    user.employee.full_name if user.employee_id else user.username
+                ),
+                "roles": sorted(
+                    set(user.active_role_codes()) | ({"ADMIN"} if user.is_superuser else set())
+                ),
             }
         )
         return data
@@ -98,29 +104,35 @@ class MeView(APIView):
         from django.db.models import Q
 
         user: User = request.user
-        employee = user.employee
+        employee = user.employee if user.employee_id else None
         today = timezone.localdate()
-        branches = []
-        if employee.home_branch is not None:
-            branches.append((employee.home_branch, True))
-        assigned = employee.branch_assignments.filter(
-            is_allowed=True, valid_from__lte=today
-        ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today)).select_related("branch")
-        for assignment in assigned:
-            branches.append((assignment.branch, False))
+        branches: list[tuple[object, bool]] = []
+        if employee is not None:
+            if employee.home_branch is not None:
+                branches.append((employee.home_branch, True))
+            assigned = employee.branch_assignments.filter(
+                is_allowed=True, valid_from__lte=today
+            ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today)).select_related("branch")
+            for assignment in assigned:
+                branches.append((assignment.branch, False))
+        employee_payload = (
+            {
+                "id": employee.id,
+                "personnel_code": employee.personnel_code,
+                "first_name": employee.first_name,
+                "last_name": employee.last_name,
+                "full_name": employee.full_name,
+                "employment_status": employee.employment_status,
+                "home_branch_id": employee.home_branch_id,
+            }
+            if employee is not None
+            else None
+        )
         return Response(
             {
                 "username": user.username,
                 "server_time": timezone.now(),
-                "employee": {
-                    "id": employee.id,
-                    "personnel_code": employee.personnel_code,
-                    "first_name": employee.first_name,
-                    "last_name": employee.last_name,
-                    "full_name": employee.full_name,
-                    "employment_status": employee.employment_status,
-                    "home_branch_id": employee.home_branch_id,
-                },
+                "employee": employee_payload,
                 "roles": sorted(
                     set(user.active_role_codes()) | ({"ADMIN"} if user.is_superuser else set())
                 ),

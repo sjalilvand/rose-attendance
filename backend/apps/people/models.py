@@ -75,10 +75,20 @@ class UserManager(BaseUserManager):
 
 
 class User(PermissionsMixin, AbstractBaseUser, TimeStampedModel):
-    """Login account bound 1:1 to an employee (sections 3 and 6)."""
+    """Login account bound 1:1 to an employee (sections 3 and 6).
+
+    System accounts (e.g. the initial superuser created with createsuperuser)
+    may have no personnel file — employee is nullable for them; every business
+    API continues to require an employee for attendance/leave flows.
+    """
 
     employee = models.OneToOneField(
-        Employee, on_delete=models.PROTECT, related_name="user_account"
+        Employee,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="user_account",
+        help_text="پروندهٔ پرسنلی؛ برای کاربران سیستمی مثل superuser می‌تواند تهی باشد",
     )
     username = models.CharField(max_length=60, unique=True)
     # AbstractBaseUser's password column renamed to password_hash per schema.

@@ -29,9 +29,9 @@ export default function SettingsPage() {
         {me && (
           <dl className="kv">
             <dt>نام</dt>
-            <dd>{me.employee.full_name}</dd>
+            <dd>{me.employee?.full_name ?? '—'}</dd>
             <dt>کد پرسنلی</dt>
-            <dd className="mono">{faDigits(me.employee.personnel_code)}</dd>
+            <dd className="mono">{me.employee ? faDigits(me.employee.personnel_code) : '—'}</dd>
             <dt>نقش‌ها</dt>
             <dd>{me.roles.map(faDigits).join('، ') || '—'}</dd>
             <dt>شعب مجاز</dt>
