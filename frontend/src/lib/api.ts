@@ -538,8 +538,10 @@ export interface MonthlyPreview {
     required_minutes: number
     accepted_work_minutes: number
     late_minutes: number
+    late_days: number
     early_leave_minutes: number
     absence_minutes: number
+    absence_days: number
     shortage_minutes: number
     overtime_minutes: number
     mission_minutes: number
@@ -557,6 +559,57 @@ export interface MonthlyPreview {
     overtime_minutes: number
     leave_minutes: number
   }[]
+}
+
+export interface YearTrendMonth {
+  jm: number
+  month_name: string
+  employees: number
+  required_minutes: number
+  accepted_work_minutes: number
+  late_minutes: number
+  late_days: number
+  absence_minutes: number
+  absence_days: number
+  shortage_minutes: number
+  overtime_minutes: number
+  leave_minutes: number
+}
+
+export interface YearTrend {
+  period_year: number
+  branch: string | null
+  rows: number
+  totals: {
+    employees: number
+    required_minutes: number
+    accepted_work_minutes: number
+    late_minutes: number
+    late_days: number
+    absence_minutes: number
+    absence_days: number
+    shortage_minutes: number
+    overtime_minutes: number
+  }
+  months: YearTrendMonth[]
+}
+
+export function fetchYearTrend(jy: number, branch?: string, refresh = false): Promise<YearTrend> {
+  const q = new URLSearchParams({ year: String(jy), refresh: refresh ? '1' : '0' })
+  if (branch) q.set('branch', branch)
+  return apiFetch(`/reports/annual/preview/?${q.toString()}`)
+}
+
+export function downloadAnnualReport(jy: number, branch?: string, refresh = false): Promise<void> {
+  const q = new URLSearchParams({ year: String(jy), refresh: refresh ? '1' : '0' })
+  if (branch) q.set('branch', branch)
+  return downloadXlsx(`/reports/annual/excel/?${q.toString()}`, `rose-annual-report-${jy}.xlsx`)
+}
+
+export function downloadDisciplinaryReport(jy: number, jm: number, branch?: string): Promise<void> {
+  const q = new URLSearchParams({ year: String(jy), month: String(jm) })
+  if (branch) q.set('branch', branch)
+  return downloadXlsx(`/reports/disciplinary/excel/?${q.toString()}`, `rose-disciplinary-${jy}-${String(jm).padStart(2, '0')}.xlsx`)
 }
 
 export function fetchMonthlyPreview(jy: number, jm: number, branch?: string): Promise<MonthlyPreview> {

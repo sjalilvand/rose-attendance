@@ -29,8 +29,14 @@ class MonthlySummary(TimeStampedModel):
     valid_presence_minutes = models.PositiveIntegerField(default=0)
     accepted_work_minutes = models.PositiveIntegerField(default=0)
     late_minutes = models.PositiveIntegerField(default=0)
+    late_days = models.PositiveIntegerField(
+        default=0, help_text="تعداد روزهای دارای تأخیر پس از بخشش ماهانه"
+    )
     early_leave_minutes = models.PositiveIntegerField(default=0)
     absence_minutes = models.PositiveIntegerField(default=0)
+    absence_days = models.PositiveIntegerField(
+        default=0, help_text="تعداد روزهای دارای غیبت"
+    )
     shortage_minutes = models.PositiveIntegerField(default=0)
     overtime_minutes = models.PositiveIntegerField(default=0)
     leave_minutes_by_type = models.JSONField(default=dict, blank=True)

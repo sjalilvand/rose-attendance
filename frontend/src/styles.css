@@ -632,3 +632,17 @@ select:focus {
 .balance-chips { margin: 0 0 10px; }
 .warn-text { color: #b3261e; font-weight: 700; }
 details > summary { cursor: pointer; }
+
+/* ---------------------------------------------------------------------------
+   HR annual trend chart (pure SVG, step 8)
+--------------------------------------------------------------------------- */
+.trend-wrap { margin-top: 12px; display: grid; gap: 12px; }
+.trend-chart { width: 100%; height: auto; direction: ltr; }
+.trend-grid { stroke: #eee2d9; stroke-width: 1; }
+.trend-tick { font-size: 10px; fill: var(--muted, #8a7f76); direction: rtl; }
+.trend-label { font-size: 11px; fill: var(--muted, #8a7f76); }
+.trend-bar-work { fill: var(--primary, #b3475f); }
+.trend-bar-absence { fill: #d9a09a; }
+.legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
+.legend-dot.legend-work { background: var(--primary, #b3475f); }
+.legend-dot.legend-absence { background: #d9a09a; }

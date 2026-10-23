@@ -1,9 +1,13 @@
-"""Monthly summaries read API — own records; >= 24-month retention window.
+"""Monthly/annual summaries read API — own records; >= 24-month retention.
 
 Step 6 increment — HR Excel reporting:
 - GET /reports/monthly/preview/?year=1404&month=7&branch=  → per-branch totals
 - GET /reports/monthly/excel/?year=1404&month=7&branch=    → xlsx download
-Both are HR/ADMIN/superuser-only and share the rollup engine (§7.4).
+Step 8 increment — annual trend + disciplinary workbook:
+- GET /reports/annual/preview/?year=1404&branch=[&refresh=0] → 12-month trend
+- GET /reports/annual/excel/?year=1404&branch=[&refresh=0]   → xlsx download
+- GET /reports/disciplinary/excel/?year=1404&month=7[&branch=] → xlsx download
+All are HR/ADMIN/superuser-only and share the rollup engine (§7.4).
 """
 from __future__ import annotations
 
@@ -36,6 +40,20 @@ def _parse_period(request) -> tuple[int, int] | None:
     if not (1300 <= jy <= 1500 and 1 <= jm <= 12):
         return None
     return jy, jm
+
+
+def _parse_year(request) -> int | None:
+    """?year= in Jalali — defaults to the current Tehran year."""
+    jy, _jm = current_jalali_period()
+    raw_year = request.query_params.get("year")
+    try:
+        if raw_year:
+            jy = int(raw_year)
+    except (TypeError, ValueError):
+        return None
+    if not (1300 <= jy <= 1500):
+        return None
+    return jy
 
 
 def _parse_branch(request):
@@ -71,6 +89,37 @@ class _MonthlyReportBaseView(APIView):
                 {"detail": "شعبه با این کد یافت نشد.", "code": "NOT_FOUND"}, status=404
             )
         return (period, branch), None
+
+    @staticmethod
+    def _refresh_flag(request, default: bool = True) -> bool:
+        raw = request.query_params.get("refresh")
+        if raw is None:
+            return default
+        return raw.lower() not in {"0", "false", "no"}
+
+
+class _YearReportBaseView(_MonthlyReportBaseView):
+    """Guard/param plumbing of the annual endpoints (?year= only)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def _context(self, request):
+        forbidden = hr_write_guard(request.user)
+        if forbidden:
+            return None, forbidden
+        jy = _parse_year(request)
+        if jy is None:
+            return None, Response(
+                {"detail": "سال شمسی نامعتبر است (?year=1404).", "code": "INVALID"},
+                status=400,
+            )
+        try:
+            branch = _parse_branch(request)
+        except Branch.DoesNotExist:
+            return None, Response(
+                {"detail": "شعبه با این کد یافت نشد.", "code": "NOT_FOUND"}, status=404
+            )
+        return (jy, branch), None
 
 
 class MonthlySummaryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -260,5 +309,80 @@ class MonthlyReportExcelView(_MonthlyReportBaseView):
         )
         response["Content-Disposition"] = (
             f'attachment; filename="rose-monthly-report-{jy}-{jm:02d}.xlsx"'
+        )
+        return response
+
+
+class YearTrendPreviewView(_YearReportBaseView):
+    """GET /reports/annual/preview/?year=1404[&branch=CODE][&refresh=0]
+
+    12-month trend of persisted MonthlySummary rows for the PWA chart.
+    Annual recompute is opt-in (?refresh=1) — 12 × 8,500 staff is not a
+    click-sized job; HR refreshes explicitly (e.g. after year-end closure).
+    """
+
+    def get(self, request):
+        context, err = self._context(request)
+        if err:
+            return err
+        jy, branch = context
+        refresh = self._refresh_flag(request, default=False)
+        if refresh:
+            for jm in range(1, 13):
+                excel_export.ensure_refreshed(jy, jm, branch, refresh=True)
+        return Response(excel_export.year_preview(jy, branch))
+
+
+class AnnualReportExcelView(_YearReportBaseView):
+    """GET /reports/annual/excel/?year=1404[&branch=CODE][&refresh=0]
+
+    Workbook: «روند ماهانه» (12 totals rows) + «خلاصه سالانه پرسنل»
+    (one row per person × branch with records in the year) + «راهنما».
+    Same refresh semantics as the preview: persisted rows by default.
+    """
+
+    def get(self, request):
+        context, err = self._context(request)
+        if err:
+            return err
+        jy, branch = context
+        if self._refresh_flag(request, default=False):
+            for jm in range(1, 13):
+                excel_export.ensure_refreshed(jy, jm, branch, refresh=True)
+        payload = excel_export.build_annual_report(
+            jy, branch, generated_by=request.user.username,
+        )
+        response = HttpResponse(
+            payload,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="rose-annual-report-{jy}.xlsx"'
+        )
+        return response
+
+
+class DisciplinaryReportExcelView(_MonthlyReportBaseView):
+    """GET /reports/disciplinary/excel/?year=1404&month=7[&branch=CODE]
+
+    Late/absence occurrence workbook for the Jalali month — always built from
+    a freshly recomputed period (same cost profile as the monthly report).
+    """
+
+    def get(self, request):
+        context, err = self._context(request)
+        if err:
+            return err
+        (jy, jm), branch = context
+        excel_export.ensure_refreshed(jy, jm, branch, refresh=True)
+        payload = excel_export.build_disciplinary_report(
+            jy, jm, branch, generated_by=request.user.username,
+        )
+        response = HttpResponse(
+            payload,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="rose-disciplinary-{jy}-{jm:02d}.xlsx"'
         )
         return response

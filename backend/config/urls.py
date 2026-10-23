@@ -27,10 +27,13 @@ from apps.people.api import (
     TokenRefreshView,
 )
 from apps.reports.api import (
+    AnnualReportExcelView,
+    DisciplinaryReportExcelView,
     ManagerBoardViewSet,
     MonthlyReportExcelView,
     MonthlyReportPreviewView,
     MonthlySummaryViewSet,
+    YearTrendPreviewView,
 )
 from apps.ops.api import HealthView
 from apps.scheduling.api import ShiftViewSet
@@ -59,6 +62,9 @@ api_v1 = [
     path("people/import/template/", PersonnelImportTemplateView.as_view(), name="people-import-template"),
     path("reports/monthly/preview/", MonthlyReportPreviewView.as_view(), name="reports-monthly-preview"),
     path("reports/monthly/excel/", MonthlyReportExcelView.as_view(), name="reports-monthly-excel"),
+    path("reports/annual/preview/", YearTrendPreviewView.as_view(), name="reports-annual-preview"),
+    path("reports/annual/excel/", AnnualReportExcelView.as_view(), name="reports-annual-excel"),
+    path("reports/disciplinary/excel/", DisciplinaryReportExcelView.as_view(), name="reports-disciplinary-excel"),
     path("leaves/ledger/template/", LedgerTemplateView.as_view(), name="leave-ledger-template"),
     path("leaves/ledger/import/", LedgerImportView.as_view(), name="leave-ledger-import"),
     path("health/", HealthView.as_view(), name="health"),

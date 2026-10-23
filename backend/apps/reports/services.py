@@ -245,8 +245,10 @@ def recompute_month_summary(employee_id: int, branch_id: int, jy: int, jm: int,
     valid_presence = sum(d.valid_presence_minutes for d in days)
     accepted_work = sum(d.accepted_work_minutes for d in days)
     late_minutes = sum(d.late_minutes for d in days)
+    late_days = sum(1 for d in days if d.late_minutes > 0)
     early_minutes = sum(d.early_leave_minutes for d in days)
     absence = sum(d.absence_minutes for d in days)
+    absence_days = sum(1 for d in days if d.absence_minutes > 0)
     overtime = sum(d.overtime_approved_minutes for d in days)
     mission = sum(d.mission_credit_minutes for d in days)
     leave_credit = sum(d.leave_credit_minutes for d in days)
@@ -280,8 +282,10 @@ def recompute_month_summary(employee_id: int, branch_id: int, jy: int, jm: int,
             valid_presence_minutes=valid_presence,
             accepted_work_minutes=accepted_work,
             late_minutes=late_minutes,
+            late_days=late_days,
             early_leave_minutes=early_minutes,
             absence_minutes=absence,
+            absence_days=absence_days,
             shortage_minutes=shortage,
             overtime_minutes=overtime,
             leave_minutes_by_type=leave_by_type,
