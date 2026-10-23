@@ -135,13 +135,20 @@ cd C:\rose-attendance
   - **API مانده**: `GET /leaves/ledger/balances/` (ماندهٔ خود شخص؛ مدیران منطقه/HR/ادمین با پارامتر `employee` برای هر پرسنل)، `GET /leaves/ledger/?employee=` (گردش‌ها — HR/ADMIN) و `POST /leaves/ledger/adjust/` (تعدیل سریع با دقیقهٔ مثبت/منفی).
   - در صف رسیدگی، ماندهٔ پرسنل برای نوع مرخصی درخواست نمایش داده می‌شود تا مدیر قبل از تصمیم ببیند؛ در `/requests` نیز چیپ ماندهٔ هر نوع ردیابی‌شده برای پرسنل نمایش داده می‌شود.
 
+## گام ۶ فاز ۲ — گزارش ماهانهٔ HR (خروجی Excel) + قالب اختصاصی seed مانده (تازه)
+
+- **گزارش ماهانهٔ Excel** (`GET /api/v1/reports/monthly/excel/?year=1404&month=7[&branch=CODE]`): سه برگهٔ RTL — «خلاصهٔ ماهانه» به تفکیک (پرسنل × شعبه) با کارکرد/تأخیر/تعجیل/غیبت/کسری/اضافه‌کار/مأموریت/مرخصی به تفکیک نوع، «ماندهٔ مرخصی» از دفتر LeaveLedger و «راهنما». دادهٔ گزارش از رول‌آپ تکرارپذیر (§7.4) می‌آید و پیش از تولید، دوره از نو محاسبه می‌شود.
+- **پیش‌نمایش PWA** (`GET /api/v1/reports/monthly/preview/`): مجموع‌های به تفکیک شعبه برای صفحهٔ `/reports` (زبانهٔ «گزارش‌ها»، فقط HR/ADMIN) با دکمهٔ دانلود فایل؛ `?refresh=0` بعد از بستن دوره از محاسبهٔ مجدد صرف‌نظر می‌کند.
+- **قالب Excel اختصاصی مانده** (`GET /api/v1/leaves/ledger/template/`): برگهٔ «انواع مرخصی» از دادهٔ زنده پر می‌شود تا کدها کپی شوند؛ **بارگذاری** (`POST /api/v1/leaves/ledger/import/`) دقیقاً همان قواعد seed جیسون (append-only، فقط OPENING/ACCRUAL/ADJUST، منفی فقط ADJUST، تاریخ شمسی، dry run، خطای ردیف‌به‌ردیف) — کارت جدید در زبانهٔ «ماندهٔ مرخصی» صفحهٔ سازمان.
+- **شروع اپ اندروید**: اسکلت Kotlin/Jetpack Compose در `android/` (ورود JWT + ثبت ورود/خروج + ماندهٔ مرخصی، RTL قفل‌شده) با workflow ساخت APK در GitHub Actions — [راهنما](android/README.md).
+
 ## مستندات
 
 - **[سند جامع نیازمندی‌ها، معماری و استقرار (نسخه ۲٫۱)](docs/REQUIREMENTS.md)** — مرجع رسمی پروژه؛ شامل نیازمندی‌های کسب‌وکار، سیاست داده، معماری Docker، API و امنیت و فازهای اجرا.
 - **[نسخه PDF سند](docs/REQUIREMENTS.pdf)** — نسخه رسمی قابل چاپ و امضا.
 - **[موارد تصویب‌شده (بخش ۳۴)](docs/REQUIREMENTS.md#۳۴-موارد-تصویب‌شده-نسخه-۲۱)** — ده تصمیم قطعی‌شده با تأیید کارفرما در نسخه ۲٫۱؛ مبنای طراحی و قرارداد.
 - **[فاز ۱ ـ تحلیل نهایی](docs/analysis/README.md)** — [مدل داده نهایی و ERD](docs/analysis/01-data-model.md) · [DDL اسکلت PostgreSQL](docs/analysis/schema.sql) · [قواعد محاسبه کارکرد](docs/analysis/02-calculation-rules.md) · [طراحی صفحات Android و PWA](docs/analysis/03-screens.md).
-- **[بک‌اند Django](backend/README.md)** — مدل‌ها، موتور تردد و محاسبات، API نسخه ۱، WebSocket، Celery و ۱۳۳ تست خط لوله.
+- **[بک‌اند Django](backend/README.md)** — مدل‌ها، موتور تردد و محاسبات، API نسخه ۱، WebSocket، Celery و ۱۵۶ تست خط لوله.
 - **[PWA پرسنل](frontend/README.md)** — گام ۲ فاز ۲: صفحات، معماری آفلاین و اجرای محلی.
 
 ## نکته امنیتی

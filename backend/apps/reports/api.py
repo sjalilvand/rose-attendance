@@ -1,11 +1,76 @@
-"""Monthly summaries read API — own records; >= 24-month retention window."""
+"""Monthly summaries read API — own records; >= 24-month retention window.
+
+Step 6 increment — HR Excel reporting:
+- GET /reports/monthly/preview/?year=1404&month=7&branch=  → per-branch totals
+- GET /reports/monthly/excel/?year=1404&month=7&branch=    → xlsx download
+Both are HR/ADMIN/superuser-only and share the rollup engine (§7.4).
+"""
 from __future__ import annotations
 
+from django.http import HttpResponse
 from rest_framework import mixins, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from apps.core.api_utils import hr_write_guard
+from apps.core.jalali import current_jalali_period
+from apps.orgs.models import Branch
+
+from . import excel_export
 from .models import MonthlySummary
+
+
+def _parse_period(request) -> tuple[int, int] | None:
+    """?year=&month= in Jalali — defaults to the current Tehran period."""
+    jy, jm = current_jalali_period()
+    raw_year = request.query_params.get("year")
+    raw_month = request.query_params.get("month")
+    try:
+        if raw_year:
+            jy = int(raw_year)
+        if raw_month:
+            jm = int(raw_month)
+    except (TypeError, ValueError):
+        return None
+    if not (1300 <= jy <= 1500 and 1 <= jm <= 12):
+        return None
+    return jy, jm
+
+
+def _parse_branch(request):
+    """?branch=CODE optional — unknown codes are a 404, not silent scope drops."""
+    code = (request.query_params.get("branch") or "").strip()
+    if not code:
+        return None
+    branch = Branch.objects.filter(code=code).first()
+    if branch is None:
+        raise Branch.DoesNotExist(code)
+    return branch
+
+
+class _MonthlyReportBaseView(APIView):
+    """Shared guard/param plumbing of the two HR report endpoints."""
+
+    permission_classes = [IsAuthenticated]
+
+    def _context(self, request):
+        forbidden = hr_write_guard(request.user)
+        if forbidden:
+            return None, forbidden
+        period = _parse_period(request)
+        if period is None:
+            return None, Response(
+                {"detail": "سال/ماه شمسی نامعتبر است (?year=1404&month=7).", "code": "INVALID"},
+                status=400,
+            )
+        try:
+            branch = _parse_branch(request)
+        except Branch.DoesNotExist:
+            return None, Response(
+                {"detail": "شعبه با این کد یافت نشد.", "code": "NOT_FOUND"}, status=404
+            )
+        return (period, branch), None
 
 
 class MonthlySummaryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -152,3 +217,48 @@ class ManagerBoardViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 )
         rows.sort(key=lambda r: (r["branch"], r["employee"]["personnel_code"]))
         return Response({"date": board_date, "count": len(rows), "results": rows[:400]})
+
+
+class MonthlyReportPreviewView(_MonthlyReportBaseView):
+    """GET /reports/monthly/preview/?year=1404&month=7[&branch=CODE][&refresh=0]
+
+    Per-branch totals of the Jalali period for the PWA page. By default the
+    period is re-rolled first (?refresh=0 reads persisted summaries as-is,
+    e.g. right after a closure where recompute would be wasted work).
+    """
+
+    def get(self, request):
+        context, err = self._context(request)
+        if err:
+            return err
+        (jy, jm), branch = context
+        refresh = request.query_params.get("refresh", "1").lower() not in {"0", "false", "no"}
+        excel_export.ensure_refreshed(jy, jm, branch, refresh=refresh)
+        return Response(excel_export.month_preview(jy, jm, branch))
+
+
+class MonthlyReportExcelView(_MonthlyReportBaseView):
+    """GET /reports/monthly/excel/?year=1404&month=7[&branch=CODE]
+
+    The workbook is always built from a freshly recomputed period — HR gets a
+    live snapshot, repeatable down to the same rule_set_ids (§2, §7.4).
+    """
+
+    def get(self, request):
+        context, err = self._context(request)
+        if err:
+            return err
+        (jy, jm), branch = context
+        excel_export.ensure_refreshed(jy, jm, branch, refresh=True)
+        payload = excel_export.build_monthly_report(
+            jy, jm, branch,
+            generated_by=request.user.username,
+        )
+        response = HttpResponse(
+            payload,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="rose-monthly-report-{jy}-{jm:02d}.xlsx"'
+        )
+        return response

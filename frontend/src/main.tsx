@@ -12,6 +12,7 @@ import RequestsPage from './pages/RequestsPage'
 import ApprovalsPage from './pages/ApprovalsPage'
 import ImportPage from './pages/ImportPage'
 import OrgPage from './pages/OrgPage'
+import ReportsPage from './pages/ReportsPage'
 import SettingsPage from './pages/SettingsPage'
 import './styles.css'
 
@@ -95,6 +96,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <OrgPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <RequireAuth>
+            <ReportsPage />
           </RequireAuth>
         }
       />

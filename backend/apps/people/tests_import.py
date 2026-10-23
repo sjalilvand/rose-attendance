@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 from openpyxl import Workbook
@@ -57,6 +58,7 @@ def upload_file(content: bytes, name="people.xlsx") -> SimpleUploadedFile:
 
 class ImportPermissionTests(TestCase):
     def setUp(self):
+        cache.clear()  # throttle bucket «import» per-IP است و بین تست‌ها می‌ماند
         make_branch()
 
     def test_anonymous_gets_401(self):
@@ -99,6 +101,7 @@ class ImportPermissionTests(TestCase):
 
 class ImportFlowTests(TestCase):
     def setUp(self):
+        cache.clear()  # ايزولیشن bucket throttle «import»
         self.branch = make_branch()
         self.shift = Shift.objects.create(
             code="SHIFT-M", name="صبح", starts_at="08:00", ends_at="14:00",

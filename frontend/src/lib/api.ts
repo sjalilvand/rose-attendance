@@ -484,20 +484,117 @@ export async function importPersonnel(file: File, dryRun: boolean): Promise<Impo
 }
 
 export async function downloadImportTemplate(): Promise<void> {
+  return downloadXlsx('/people/import/template/', 'personnel-import-template.xlsx')
+}
+
+/** Authenticated xlsx download → save via a temporary anchor. */
+async function downloadXlsx(path: string, filename: string): Promise<void> {
   const token = getAccessToken()
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(`${BASE}/people/import/template/`, { headers })
-  if (!res.ok) throw new ApiError(res.status, 'دانلود قالب ناموفق بود.')
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, { headers })
+  } catch {
+    throw new ApiError(0, 'network-unreachable')
+  }
+  if (!res.ok) {
+    let detail = 'دانلود فایل ناموفق بود.'
+    try {
+      const data = (await res.json()) as { detail?: string }
+      detail = data.detail ?? detail
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, detail)
+  }
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = 'personnel-import-template.xlsx'
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+// ---------------------------------------------------------------------------
+// HR monthly Excel report (phase-2 step 6) — preview + workbook download
+// ---------------------------------------------------------------------------
+export interface MonthlyPreview {
+  period: { jy: number; jm: number }
+  branch: string | null
+  rows: number
+  totals: {
+    employees: number
+    required_minutes: number
+    accepted_work_minutes: number
+    late_minutes: number
+    early_leave_minutes: number
+    absence_minutes: number
+    shortage_minutes: number
+    overtime_minutes: number
+    mission_minutes: number
+    leave_minutes: number
+    final_count: number
+  }
+  by_branch: {
+    branch: string
+    employees: number
+    required_minutes: number
+    accepted_work_minutes: number
+    late_minutes: number
+    absence_minutes: number
+    shortage_minutes: number
+    overtime_minutes: number
+    leave_minutes: number
+  }[]
+}
+
+export function fetchMonthlyPreview(jy: number, jm: number, branch?: string): Promise<MonthlyPreview> {
+  const q = new URLSearchParams({ year: String(jy), month: String(jm) })
+  if (branch) q.set('branch', branch)
+  return apiFetch(`/reports/monthly/preview/?${q.toString()}`)
+}
+
+export function downloadMonthlyReport(jy: number, jm: number, branch?: string): Promise<void> {
+  const q = new URLSearchParams({ year: String(jy), month: String(jm) })
+  if (branch) q.set('branch', branch)
+  return downloadXlsx(`/reports/monthly/excel/?${q.toString()}`, `rose-monthly-report-${jy}-${String(jm).padStart(2, '0')}.xlsx`)
+}
+
+// ---------------------------------------------------------------------------
+// Leave balance xlsx — dedicated template + import (phase-2 step 6)
+// ---------------------------------------------------------------------------
+export function downloadLedgerTemplate(): Promise<void> {
+  return downloadXlsx('/leaves/ledger/template/', 'leave-balance-template.xlsx')
+}
+
+export async function importLedgerBalances(file: File, dryRun: boolean): Promise<ImportReport> {
+  const token = getAccessToken()
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const form = new FormData()
+  form.append('file', file)
+  form.append('dry_run', dryRun ? 'true' : 'false')
+  let res: Response
+  try {
+    res = await fetch(`${BASE}/leaves/ledger/import/`, { method: 'POST', headers, body: form })
+  } catch {
+    throw new ApiError(0, 'network-unreachable')
+  }
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      const data = (await res.json()) as { detail?: string }
+      detail = data.detail ?? detail
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, detail)
+  }
+  return (await res.json()) as ImportReport
 }
 
 // ---------------------------------------------------------------------------

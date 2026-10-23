@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import {
   adjustLedger,
@@ -7,12 +7,14 @@ import {
   createBranch,
   createRegion,
   createShift,
+  downloadLedgerTemplate,
   fetchLeaveBalances,
   fetchLeaveTypes,
   fetchLedger,
   fetchOrgBranches,
   fetchOrgRegions,
   fetchOrgShifts,
+  importLedgerBalances,
   seedLedger,
   type BalancesResp,
   type BulkReport,
@@ -764,6 +766,8 @@ function BalancesTab() {
         onRun={runSeed}
       />
 
+      <LedgerExcelCard onImported={() => { if (lookupPc.trim()) void lookup() }} />
+
       <section className="card">
         <h3 className="h4">پارامترهای ورود گروهی مانده</h3>
         <div className="grid3">
@@ -821,5 +825,82 @@ function BalancesTab() {
         </form>
       </section>
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Ledger Excel — dedicated template download + xlsx import (step 6)
+// ---------------------------------------------------------------------------
+function LedgerExcelCard({ onImported }: { onImported: () => void }) {
+  const [file, setFile] = useState<File | null>(null)
+  const [dryRun, setDryRun] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [report, setReport] = useState<BulkReport | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const submit = async () => {
+    if (!file || busy) return
+    setBusy(true)
+    setError(null)
+    setReport(null)
+    try {
+      setReport(await importLedgerBalances(file, dryRun))
+      if (!dryRun) onImported()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'خطای نامشخص')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <h3 className="h4">قالب Excel ماندهٔ مرخصی</h3>
+      <p className="hint">
+        قالب را دانلود کنید — برگهٔ «انواع مرخصی» کدهای فعال را خودکار پر می‌کند. تاریخ مبنا شمسی
+        است (مثل 1404/01/01) و هر ردیف یک گردش جدید ثبت می‌کند؛ پس قبل از ثبت نهایی، «بررسی بدون ثبت»
+        را بزنید.
+      </p>
+      <div className="import-grid">
+        <label className="field-row">
+          <span>فایل</span>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".xlsx"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null)
+              setReport(null)
+              setError(null)
+            }}
+          />
+        </label>
+        <label className="field-row checkbox">
+          <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
+          <span>بررسی بدون ثبت (dry run)</span>
+        </label>
+        <div className="import-actions">
+          <button
+            className="btn primary"
+            type="button"
+            disabled={!file || busy}
+            onClick={() => void submit()}
+          >
+            {busy ? 'در حال پردازش…' : dryRun ? 'بررسی فایل' : 'ثبت نهایی'}
+          </button>
+          <button
+            className="btn ghost"
+            type="button"
+            disabled={busy}
+            onClick={() => void downloadLedgerTemplate()}
+          >
+            دانلود قالب Excel مانده
+          </button>
+        </div>
+        {error && <p className="import-error">{error}</p>}
+      </div>
+      {report && <BulkReportView report={report} keyName="personnel_code" />}
+    </section>
   )
 }

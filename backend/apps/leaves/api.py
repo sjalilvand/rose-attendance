@@ -19,11 +19,13 @@ from __future__ import annotations
 
 from django.db import transaction
 from django.db.models import Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.core.api_utils import hr_write_guard
 from apps.core.enums import ApprovalAction, LeaveEntryKind, RequestStatus, SegmentStatus
@@ -610,3 +612,58 @@ class LeaveLedgerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             source_type="HR_ADJUST",
         )
         return Response(_serialize_ledger_entry(entry), status=201)
+
+
+class LedgerTemplateView(APIView):
+    """GET /leaves/ledger/template/ — dedicated xlsx template (HR/ADMIN).
+
+    Sheet «انواع مرخصی» is generated from live active types so HR copies
+    codes instead of typing them; unknown codes are the #1 import error.
+    """
+
+    def get(self, request):
+        forbidden = hr_write_guard(request.user)
+        if forbidden:
+            return forbidden
+        payload = ledger_svc.build_balance_template()
+        response = HttpResponse(
+            payload,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="leave-balance-template.xlsx"'
+        return response
+
+
+class LedgerImportView(APIView):
+    """POST /leaves/ledger/import/ — multipart xlsx; form field dry_run=true.
+
+    Same report shape as the JSON seed and the personnel import:
+    {total, created, updated, skipped, errors[], dry_run}.
+    """
+
+    throttle_scope = "import"
+
+    def post(self, request):
+        forbidden = hr_write_guard(request.user)
+        if forbidden:
+            return forbidden
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response(
+                {"detail": "فایل xlsx الزامی است.", "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if upload.size > 5 * 1024 * 1024:
+            return Response(
+                {"detail": "حجم فایل بیش از ۵ مگابایت است.", "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        dry_run = str(request.data.get("dry_run", "")).lower() in {"1", "true", "yes"}
+        try:
+            report = ledger_svc.import_balances(upload.read(), dry_run=dry_run)
+        except ledger_svc.WorkbookError as exc:
+            return Response(
+                {"detail": str(exc), "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(report)

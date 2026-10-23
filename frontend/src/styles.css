@@ -82,7 +82,8 @@ body {
   position: sticky;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* ۹ زبانهٔ مدیران HR در موبایل جا شود — خودکار ستون‌بندی و رفتن به ردیف دوم */
+  grid-template-columns: repeat(auto-fit, minmax(4.2rem, 1fr));
   background: var(--surface);
   border-top: 1px solid var(--border);
   z-index: 5;

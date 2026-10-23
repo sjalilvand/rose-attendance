@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -62,6 +63,7 @@ def window(days_ahead=1, hours=4):
 
 class SeedAndBalanceTests(TestCase):
     def setUp(self):
+        cache.clear()  # bucket throttle «seed» per-IP است و بین تست‌ها می‌ماند
         self.branch = make_branch()
         self.emp, self.user = make_employee(self.branch)
         self.hr_emp, self.hr_user = make_employee(self.branch, code="HR-9")

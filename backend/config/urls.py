@@ -10,7 +10,14 @@ from apps.attendance.api import (
     OvertimeProposalViewSet,
     ReviewQueueViewSet,
 )
-from apps.leaves.api import LeaveLedgerViewSet, LeaveTypeViewSet, RequestQueueViewSet, RequestsViewSet
+from apps.leaves.api import (
+    LeaveLedgerViewSet,
+    LeaveTypeViewSet,
+    LedgerImportView,
+    LedgerTemplateView,
+    RequestQueueViewSet,
+    RequestsViewSet,
+)
 from apps.orgs.api import BranchViewSet, RegionViewSet
 from apps.people.api import (
     MeView,
@@ -19,7 +26,12 @@ from apps.people.api import (
     TokenObtainPairWithLockoutView,
     TokenRefreshView,
 )
-from apps.reports.api import ManagerBoardViewSet, MonthlySummaryViewSet
+from apps.reports.api import (
+    ManagerBoardViewSet,
+    MonthlyReportExcelView,
+    MonthlyReportPreviewView,
+    MonthlySummaryViewSet,
+)
 from apps.ops.api import HealthView
 from apps.scheduling.api import ShiftViewSet
 
@@ -45,6 +57,10 @@ api_v1 = [
     path("me/", MeView.as_view(), name="me"),
     path("people/import/", PersonnelImportView.as_view(), name="people-import"),
     path("people/import/template/", PersonnelImportTemplateView.as_view(), name="people-import-template"),
+    path("reports/monthly/preview/", MonthlyReportPreviewView.as_view(), name="reports-monthly-preview"),
+    path("reports/monthly/excel/", MonthlyReportExcelView.as_view(), name="reports-monthly-excel"),
+    path("leaves/ledger/template/", LedgerTemplateView.as_view(), name="leave-ledger-template"),
+    path("leaves/ledger/import/", LedgerImportView.as_view(), name="leave-ledger-import"),
     path("health/", HealthView.as_view(), name="health"),
 ]
 
