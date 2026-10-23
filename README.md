@@ -7,7 +7,7 @@
 | موضوع | شرح |
 |---|---|
 | نسخه سند مرجع | ۲٫۱ |
-| وضعیت | مبنای طراحی، توسعه، آزمون و برآورد پروژه |
+| وضعیت | فاز ۱ کامل (تحلیل نهایی) · فاز ۲ در جریان — گام ۱ هسته بک‌اند Django منتشر شد |
 | محل استقرار | مرکز داده، قابل دسترسی از اینترنت |
 | استقرار | Docker و Docker Compose |
 
@@ -33,9 +33,12 @@
 
 ```text
 rose-attendance/
-├── backend/            # بک‌اند Django (فاز توسعه)
+├── backend/            # بک‌اند Django (فاز ۲، گام ۱ منتشر شد)
+│   ├── config/         # settings سه‌لایه + Celery + ASGI
+│   ├── apps/           # core, orgs, people, scheduling, attendance, leaves, messaging, rules, reports, ops
+│   ├── requirements.in / requirements.lock (hashed)
 │   └── Dockerfile
-├── frontend/           # PWA و پنل مدیران (فاز توسعه)
+├── frontend/           # PWA و پنل مدیران (گام بعدی فاز ۲)
 │   ├── Dockerfile
 │   └── nginx.conf
 ├── deploy/
@@ -52,7 +55,7 @@ rose-attendance/
 
 ## شروع سریع
 
-> ⚠️ این مخزن در مرحله سند و اسکلت استقرار است؛ کد اپلیکیشن در فازهای توسعه تکمیل می‌شود (بخش ۳۲ سند).
+> ⚠️ کد بک‌اند در `backend/` قرار دارد؛ راهنمای اجرای محلی و قرارداد API در [backend/README.md](backend/README.md). استقرار تولید همان پایپ‌لاین Docker زیر است.
 
 ```bash
 # ۱) قالب تنظیمات را آماده کنید
@@ -79,6 +82,7 @@ docker compose ps
 - **[نسخه PDF سند](docs/REQUIREMENTS.pdf)** — نسخه رسمی قابل چاپ و امضا.
 - **[موارد تصویب‌شده (بخش ۳۴)](docs/REQUIREMENTS.md#۳۴-موارد-تصویب‌شده-نسخه-۲۱)** — ده تصمیم قطعی‌شده با تأیید کارفرما در نسخه ۲٫۱؛ مبنای طراحی و قرارداد.
 - **[فاز ۱ ـ تحلیل نهایی](docs/analysis/README.md)** — [مدل داده نهایی و ERD](docs/analysis/01-data-model.md) · [DDL اسکلت PostgreSQL](docs/analysis/schema.sql) · [قواعد محاسبه کارکرد](docs/analysis/02-calculation-rules.md) · [طراحی صفحات Android و PWA](docs/analysis/03-screens.md).
+- **[بک‌اند Django](backend/README.md)** — گام ۱ فاز ۲: مدل‌ها، موتور تردد (ژئوفنس/آفلاین/جفت‌سازی)، API نسخه ۱، Celery و ۳۵ تست خط لوله.
 
 ## نکته امنیتی
 

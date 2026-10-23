@@ -35,3 +35,11 @@ compose.override.yml
 *.swp
 .DS_Store
 Thumbs.db
+
+# Local dev artifacts
+*.sqlite3
+backend/db.sqlite3
+__pycache__/
+*.pyc
+.venv/
+venv/
