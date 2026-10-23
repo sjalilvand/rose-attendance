@@ -1,0 +1,43 @@
+name: android-build
+
+# ساخت APK اشکال‌زدایی روی هر push مسیر android/** — بدون نیاز به Android
+# Studio محلی؛ فایل نهایی در آرتیفکت‌های همان ران GitHub قابل دانلود است.
+#
+# توجه: این فایل «دستور کار» CI است و برای فعال‌سازی باید یک‌بار در مسیر
+# .github/workflows/android.yml قرار بگیرد — مراحل در README همین پوشه،
+# بخش «فعال‌سازی CI ساخت APK» آمده است (از طریق وب‌اینترفیس گیت‌هاب،
+# بدون نیاز به توکن دارای scope ویژه).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+
+jobs:
+  assembleDebug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Assemble debug APK
+        working-directory: android
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rose-attendance-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
