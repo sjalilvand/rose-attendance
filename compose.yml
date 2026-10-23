@@ -1,0 +1,166 @@
+# Rose Attendance — single-host controlled deployment template.
+# Full requirements and completion checklist: docs/REQUIREMENTS.md section 22.
+# Requires: .env (from .env.example) and ./secrets/{django_secret,db_password}.txt
+
+name: rose-attendance
+
+x-app: &app
+  image: rose-attendance-backend:${APP_VERSION:?APP_VERSION is required}
+  build:
+    context: ./backend
+  env_file:
+    - .env
+  secrets:
+    - django_secret
+    - db_password
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.production
+    DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret
+    DB_PASSWORD_FILE: /run/secrets/db_password
+    DB_HOST: db
+    DB_PORT: "5432"
+    REDIS_URL: redis://redis:6379/0
+  networks:
+    - backend
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rose_attendance
+      POSTGRES_USER: rose_app
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U rose_app -d rose_attendance
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redisdata:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request;
+          urllib.request.urlopen(
+          'http://127.0.0.1:8000/health/ready', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *app
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - config
+      - worker
+      - --loglevel=INFO
+      - --concurrency=2
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    <<: *app
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - config
+      - beat
+      - --loglevel=INFO
+      - --schedule=/var/lib/celery/celerybeat-schedule
+    volumes:
+      - beatdata:/var/lib/celery
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  gateway:
+    image: rose-attendance-web:${APP_VERSION:?APP_VERSION is required}
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/tls:/etc/nginx/tls:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
+  beatdata:
+
+networks:
+  backend:
+
+secrets:
+  django_secret:
+    file: ./secrets/django_secret.txt
+  db_password:
+    file: ./secrets/db_password.txt
