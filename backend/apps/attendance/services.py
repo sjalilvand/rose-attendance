@@ -7,6 +7,7 @@ Implements docs/analysis/02-calculation-rules.md §3 (pairing) and §4
 - sync_batch()         — offline batch (<= SYNC_MAX_BATCH), stale -> NEEDS_REVIEW
 - rebuild_pairings()   — deterministic session reconstruction from effective time
 - approve_review()     — manager/HR TIME_FIX decision layer
+- reject_review()      — manager/HR VOID decision layer (REJECTED_TECHNICAL)
 """
 from __future__ import annotations
 
@@ -373,6 +374,23 @@ def receive_punch(*, employee, branch, event_type: str, event_uuid,
     )
     apply_event_to_pairing(event)
     refresh_summary_after_punch(employee, branch, event.effective_time)
+    if decision.event_status == EventStatus.NEEDS_REVIEW:
+        # Review-flow completion: branch managers learn about the event
+        # immediately (row persisted in-tx, live push after commit).
+        from apps.messaging.services import notify_branch_managers
+
+        notify_branch_managers(
+            branch_id=branch.id,
+            kind="REVIEW_REQUIRED",
+            title="تردد نیازمند رسیدگی جدید ثبت شد",
+            payload={
+                "event_uuid": str(event.event_uuid),
+                "personnel_code": employee.personnel_code,
+                "employee_name": employee.full_name,
+                "flags": decision.flags,
+                "connection_mode": connection_mode,
+            },
+        )
     return event, True
 
 
@@ -411,5 +429,44 @@ def approve_review(*, event: AttendanceEvent, decided_by, corrected_time: dt.dat
         kind="REVIEW_RESOLVED",
         title="تردد نیازمند رسیدگی شما تأیید شد",
         payload={"event_id": event.id, "effective_time": corrected_time.isoformat()},
+    )
+    return event
+
+
+@transaction.atomic
+def reject_review(*, event: AttendanceEvent, decided_by, reason: str) -> AttendanceEvent:
+    """Manager/HR refusal of a NEEDS_REVIEW event (decision layer, section 8).
+
+    The raw event is kept forever but flagged REJECTED_TECHNICAL and excluded
+    from pairing (apply/rebuild fold ACCEPTED events only). A VOID adjustment
+    records the decision; the employee is notified like on approval.
+    """
+    previous = {
+        "effective_time": event.effective_time.isoformat(),
+        "event_status": event.event_status,
+    }
+    event.event_status = EventStatus.REJECTED_TECHNICAL
+    event.flags = sorted({*event.flags, "REVIEW_RESOLVED", "REVIEW_REJECTED"})
+    event.save(update_fields=["event_status", "flags", "updated_at"])
+
+    AttendanceAdjustment.objects.create(
+        target_event=event,
+        adjustment_kind=AdjustmentKind.VOID,
+        original_value=previous,
+        corrected_value={"event_status": EventStatus.REJECTED_TECHNICAL},
+        reason=reason,
+        decided_by=decided_by,
+    )
+    # Rebuild is a no-op for this event (not ACCEPTED) but re-runs for the
+    # whole (person, branch) stream so prior state stays deterministic.
+    rebuild_pairings(event.employee_id, event.branch_id)
+
+    from apps.messaging.services import notify_employee
+
+    notify_employee(
+        employee_id=event.employee_id,
+        kind="REVIEW_REJECTED",
+        title="تردد نیازمند رسیدگی شما رد شد",
+        payload={"event_id": event.id, "reason": reason},
     )
     return event

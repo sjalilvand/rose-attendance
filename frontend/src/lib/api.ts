@@ -432,6 +432,13 @@ export function approveReviewPunch(
   })
 }
 
+export function rejectReviewPunch(event_uuid: string, reason: string): Promise<PunchResult> {
+  return apiFetch('/attendance/review-queue/reject/', {
+    method: 'POST',
+    body: JSON.stringify({ event_uuid, reason }),
+  })
+}
+
 export function fetchOvertime(status?: string): Promise<{ count: number; results: OvertimeItem[] }> {
   const qs = status ? `&status=${encodeURIComponent(status)}` : ''
   return apiFetch(`/attendance/overtime/?page_size=100${qs}`)

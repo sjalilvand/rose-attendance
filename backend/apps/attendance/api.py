@@ -24,7 +24,7 @@ from apps.people.models import User
 from apps.reports.services import compute_days_for_month
 
 from .models import AttendanceEvent, AttendanceSession, OvertimeProposal
-from .services import approve_review, receive_punch
+from .services import approve_review, receive_punch, reject_review
 
 
 class PunchBaseSerializer(serializers.Serializer):
@@ -288,6 +288,38 @@ class ReviewQueueViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         if timezone.is_naive(corrected_dt):
             corrected_dt = timezone.make_aware(corrected_dt)
         event = approve_review(event=event, decided_by=user, corrected_time=corrected_dt, reason=reason)
+        return Response(punch_response(event, created=False))
+
+    @action(detail=False, methods=["post"], url_path="reject")
+    def reject(self, request):
+        """POST {event_uuid, reason} — VOID decision layer (section 8).
+
+        The event stays in history as REJECTED_TECHNICAL and leaves pairing;
+        the reason is mandatory so the audit trail stays meaningful.
+        """
+        user: User = request.user
+        if not (
+            user.is_superuser
+            or any(user.has_role(r) for r in self.REVIEWER_ROLES)
+        ):
+            return Response({"detail": "دسترسی رسیدگی ندارید.", "code": "FORBIDDEN"},
+                            status=403)
+        event_uuid = request.data.get("event_uuid")
+        reason = str(request.data.get("reason") or "").strip()
+        if not event_uuid:
+            return Response(
+                {"detail": "event_uuid الزامی است.", "code": "INVALID"}, status=400
+            )
+        if len(reason) < 3:
+            return Response(
+                {"detail": "ذکر دلیل برای رد رویداد الزامی است.", "code": "REASON_REQUIRED"},
+                status=400,
+            )
+        try:
+            event = self.get_queryset().get(event_uuid=event_uuid)
+        except AttendanceEvent.DoesNotExist:
+            return Response({"detail": "رویداد یافت نشد.", "code": "NOT_FOUND"}, status=404)
+        event = reject_review(event=event, decided_by=user, reason=reason)
         return Response(punch_response(event, created=False))
 
 

@@ -7,12 +7,14 @@ import {
   fetchOvertime,
   fetchRequestQueue,
   fetchReviewQueue,
+  rejectReviewPunch,
   type BoardRow,
   type OvertimeItem,
   type QueueItem,
   type ReviewItem,
 } from '../lib/api'
 import { formatJalaliDate, formatJalaliDateTime, formatTime, minutesToHM } from '../lib/jalali'
+import { subscribeNotifications } from '../lib/ws'
 import { useAuth } from '../context/AuthContext'
 
 const MANAGER_ROLES = ['BRANCH_MANAGER', 'REGION_MANAGER', 'HR', 'ADMIN']
@@ -186,6 +188,16 @@ function ReviewQueue() {
     void load()
   }, [load])
 
+  // Live refresh — a fresh REVIEW_REQUIRED punch or a decision made on
+  // another tab/device updates the queue without a manual reload.
+  useEffect(
+    () =>
+      subscribeNotifications((n) => {
+        if (['REVIEW_REQUIRED', 'REVIEW_RESOLVED', 'REVIEW_REJECTED'].includes(n.kind)) void load()
+      }),
+    [load],
+  )
+
   async function approve(item: ReviewItem) {
     setError('')
     setNotice('')
@@ -201,6 +213,26 @@ function ReviewQueue() {
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'رسیدگی ناموفق بود')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function reject(item: ReviewItem) {
+    setError('')
+    setNotice('')
+    const reason = (reasons[item.event_uuid] ?? '').trim()
+    if (reason.length < 3) {
+      setError('برای رد رویداد، ذکر دلیل الزامی است.')
+      return
+    }
+    setBusyId(item.event_uuid)
+    try {
+      await rejectReviewPunch(item.event_uuid, reason)
+      setNotice('رویداد رد شد؛ در سوابق با برچسب «رد فنی» حفظ می‌شود.')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'رد ناموفق بود')
     } finally {
       setBusyId(null)
     }
@@ -239,7 +271,7 @@ function ReviewQueue() {
               />
             </label>
             <label className="field-row">
-              <span>دلیل (اختیاری)</span>
+              <span>دلیل تصمیم (برای رد الزامی)</span>
               <input
                 value={reasons[item.event_uuid] ?? ''}
                 onChange={(e) => setReasons((prev) => ({ ...prev, [item.event_uuid]: e.target.value }))}
@@ -250,6 +282,14 @@ function ReviewQueue() {
           <div className="row-actions">
             <button className="btn" type="button" disabled={busyId === item.event_uuid} onClick={() => void approve(item)}>
               ثبت رسیدگی
+            </button>
+            <button
+              className="btn btn-danger-soft"
+              type="button"
+              disabled={busyId === item.event_uuid}
+              onClick={() => void reject(item)}
+            >
+              رد رویداد
             </button>
           </div>
         </div>

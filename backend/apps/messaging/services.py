@@ -52,3 +52,70 @@ def notify_employee(*, employee_id: int, kind: str, title: str, payload: dict | 
         # No running event loop in this thread (rare sync contexts) — the
         # persisted notification is enough; never break the business flow.
         pass
+
+
+def _push_to_user_groups(targets: list[int], *, kind: str, title: str,
+                         payload: dict | None, created_at) -> None:
+    """Best-effort group_send to user-<id> groups; never raises."""
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    for user_id in targets:
+        try:
+            async_to_sync(layer.group_send)(
+                f"user-{user_id}",
+                {
+                    "type": "notify",
+                    "kind": kind,
+                    "title": title,
+                    "payload": payload or {},
+                    "created_at": created_at.isoformat(),
+                },
+            )
+        except RuntimeError:
+            # No running event loop in this thread — persistence is enough.
+            pass
+
+
+def notify_branch_managers(*, branch_id: int, kind: str, title: str,
+                           payload: dict | None = None) -> None:
+    """Alert the BRANCH_MANAGERs of one branch (review-flow completion).
+
+    A Notification row is persisted per manager (messaging contract, §12) and
+    the live WebSocket push is deferred to transaction.on_commit so recipients
+    never see an event whose row could still roll back.
+    """
+    from django.db import transaction
+
+    from apps.messaging.models import Notification
+    from apps.people.models import User
+
+    managers = list(
+        User.objects.filter(
+            is_active=True,
+            role_assignments__branch_id=branch_id,
+            role_assignments__role__code="BRANCH_MANAGER",
+        )
+        .exclude(employee_id=None)
+        .distinct()
+        .values_list("id", "employee_id")
+    )
+    if not managers:
+        return
+
+    created_at = timezone.now()
+    for _user_id, employee_id in managers:
+        Notification.objects.create(
+            recipient_id=employee_id,
+            kind=kind,
+            payload={"title": title, **(payload or {})},
+        )
+    user_ids = [user_id for user_id, _employee_id in managers]
+    transaction.on_commit(
+        lambda: _push_to_user_groups(
+            user_ids, kind=kind, title=title, payload=payload, created_at=created_at
+        )
+    )

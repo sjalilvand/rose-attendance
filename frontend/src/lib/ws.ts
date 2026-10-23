@@ -19,6 +19,7 @@ let started = false
 let attempt = 0
 let generation = 0
 let listener: ((n: LiveNotification) => void) | null = null
+const subscribers = new Set<(n: LiveNotification) => void>()
 
 function wsUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -51,7 +52,16 @@ function start(): void {
   socket.onmessage = (ev) => {
     try {
       const data = JSON.parse(ev.data) as LiveNotification
-      if (data.type === 'notification') listener?.(data)
+      if (data.type === 'notification') {
+        listener?.(data)
+        subscribers.forEach((cb) => {
+          try {
+            cb(data)
+          } catch {
+            /* a broken subscriber never breaks the others */
+          }
+        })
+      }
     } catch {
       /* non-JSON frame — ignore */
     }
@@ -69,6 +79,14 @@ function start(): void {
 export function startNotifications(onNotify: (n: LiveNotification) => void): void {
   listener = onNotify
   start()
+}
+
+/** Extra listeners (e.g. live refresh of the review queue) — returns unsubscribe. */
+export function subscribeNotifications(cb: (n: LiveNotification) => void): () => void {
+  subscribers.add(cb)
+  return () => {
+    subscribers.delete(cb)
+  }
 }
 
 export function stopNotifications(): void {
