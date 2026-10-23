@@ -1,0 +1,26 @@
+# Line-ending policy: LF everywhere (repository AND working trees, Windows
+# clones included) so frontend/docker-entrypoint.sh stays executable inside
+# Alpine images, and phantom "local changes" never appear after clone on
+# Windows (core.autocrlf=true). CRLF only for Windows-native scripts.
+* text=auto eol=lf
+
+# Windows-native scripts keep CRLF in working trees
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets — never convert
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.sqlite3 binary
+*.db binary
