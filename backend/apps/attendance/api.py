@@ -1,6 +1,9 @@
 """Attendance API — online punch, offline sync, history, review queue.
 
 Throttle scopes: punch (60/min), sync (20/min) per user (base settings).
+
+Daily board (calculation-rules §7): derived per-day results — pure, no
+extra persistence — and the overtime approval flow (§7.3).
 """
 from __future__ import annotations
 
@@ -14,12 +17,13 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.core.enums import ConnectionMode, EventStatus
-from apps.core.jalali import subtract_jalali_months
+from apps.core.enums import ConnectionMode, EventStatus, SegmentStatus, SessionState
+from apps.core.jalali import current_jalali_period, jalali_month_range, subtract_jalali_months
 from apps.orgs.models import Branch
 from apps.people.models import User
+from apps.reports.services import compute_days_for_month
 
-from .models import AttendanceEvent, AttendanceSession
+from .models import AttendanceEvent, AttendanceSession, OvertimeProposal
 from .services import approve_review, receive_punch
 
 
@@ -94,6 +98,7 @@ def punch_response(event: AttendanceEvent, created: bool) -> dict:
     return {
         "event_uuid": str(event.event_uuid),
         "created": created,
+        "event_type": event.event_type,
         "event_status": event.event_status,
         "location_status": event.location_status,
         "location_reason": event.location_reason,
@@ -284,3 +289,241 @@ class ReviewQueueViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             corrected_dt = timezone.make_aware(corrected_dt)
         event = approve_review(event=event, decided_by=user, corrected_time=corrected_dt, reason=reason)
         return Response(punch_response(event, created=False))
+
+
+def _serialize_day(day) -> dict:
+    """DayResult → JSON (Jalali period fields included for the PWA)."""
+    return {
+        "shift_date": day.shift_date,
+        "branch": day.branch_id,
+        "scheduled_shift_id": day.scheduled_shift_id,
+        "shift_code": day.shift_code,
+        "is_workday": day.is_workday,
+        "is_holiday": day.is_holiday,
+        "required_minutes": day.required_minutes,
+        "valid_presence_minutes": day.valid_presence_minutes,
+        "accepted_work_minutes": day.accepted_work_minutes,
+        "rest_minutes": day.rest_minutes,
+        "late_minutes": day.late_minutes,
+        "late_deduct_mode": day.late_deduct_mode,
+        "late_deduction_minutes": day.late_deduction_minutes,
+        "early_leave_minutes": day.early_leave_minutes,
+        "overtime_proposed_minutes": day.overtime_proposed_minutes,
+        "overtime_approved_minutes": day.overtime_approved_minutes,
+        "absence_minutes": day.absence_minutes,
+        "leave_minutes_by_type": day.leave_minutes_by_type,
+        "mission_minutes": day.mission_minutes,
+        "session_count": day.session_count,
+        "incomplete_sessions": day.incomplete_sessions,
+        "flags": sorted(set(day.flags)),
+        "first_in": day.first_in,
+        "last_out": day.last_out,
+    }
+
+
+class DailyBoardViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """GET /api/v1/attendance/daily/?from=YYYY-MM-DD&to=YYYY-MM-DD
+
+    Derived daily work rows (late/rest/overtime/absence/leave) for the
+    requesting employee — window capped at the 3-Jalali-month detail
+    retention (approved decision #2). `?today` action returns the punch
+    page card. No persistence: always recomputed from sessions (repeatable).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    MAX_WINDOW_DAYS = 45
+
+    def _parse_window(self, request):
+        today = timezone.localdate()
+        to_raw, from_raw = request.query_params.get("to"), request.query_params.get("from")
+        try:
+            to_date = dt.date.fromisoformat(to_raw) if to_raw else today
+            from_date = dt.date.fromisoformat(from_raw) if from_raw else to_date - dt.timedelta(days=29)
+        except ValueError:
+            return None
+        if from_date > to_date:
+            from_date, to_date = to_date, from_date
+        if (to_date - from_date).days > self.MAX_WINDOW_DAYS:
+            return None
+        # Detail retention cap — same window as the events history (decision #2)
+        if from_date < subtract_jalali_months(timezone.now(), 3).date():
+            return None
+        return from_date, to_date
+
+    def _rows(self, employee, from_date, to_date):
+        rows = []
+        seen = set()
+        cursor = from_date
+        months: list[tuple[int, int]] = []
+        while cursor <= to_date:
+            jy, jm = current_jalali_period(
+                dt.datetime.combine(cursor, dt.time(12, 0)).replace(tzinfo=timezone.get_current_timezone())
+            )
+            key = (jy, jm)
+            if key not in seen:
+                seen.add(key)
+                months.append(key)
+            cursor += dt.timedelta(days=1)
+        # Decision #5 — multi-branch staff see one row per (day, branch).
+        branch_ids = {employee.home_branch_id}
+        branch_ids.update(
+            employee.branch_assignments.filter(is_allowed=True).values_list("branch_id", flat=True)
+        )
+        for jy, jm in months:
+            for branch_id in sorted(branch_ids):
+                results, _resolver = compute_days_for_month(employee.id, branch_id, jy, jm)
+                for day in results:
+                    if from_date <= day.shift_date <= to_date:
+                        rows.append(_serialize_day(day))
+        rows.sort(key=lambda r: r["shift_date"], reverse=True)
+        return rows
+
+    def list(self, request, *args, **kwargs):
+        window = self._parse_window(request)
+        if window is None:
+            return Response(
+                {"detail": "بازه نامعتبر است؛ حداکثر ۴۵ روز و داخل پنجره سه‌ماهه شمسی.",
+                 "code": "INVALID_WINDOW"},
+                status=400,
+            )
+        rows = self._rows(request.user.employee, *window)
+        return Response({"count": len(rows), "results": rows})
+
+    @action(detail=False, methods=["get"], url_name="today", url_path="today")
+    def today(self, request):
+        """Punch-page card: today's day row + today's events + open session."""
+        employee = request.user.employee
+        today = timezone.localdate()
+        jy, jm = current_jalali_period()
+        results, _ = compute_days_for_month(employee.id, employee.home_branch_id, jy, jm)
+        day = next((d for d in results if d.shift_date == today), None)
+        window_start = timezone.make_aware(dt.datetime.combine(today, dt.time.min))
+        window_end = window_start + dt.timedelta(days=1)
+        events = AttendanceEvent.objects.filter(
+            employee=employee, effective_time__range=(window_start, window_end)
+        ).select_related("branch").order_by("effective_time")
+        open_session = AttendanceSession.objects.filter(
+            employee=employee, session_state=SessionState.OPEN, is_purged=False
+        ).select_related("branch", "check_in_event").first()
+        return Response(
+            {
+                "today": _serialize_day(day) if day else None,
+                "events": [
+                    {
+                        "event_uuid": str(e.event_uuid),
+                        "event_type": e.event_type,
+                        "branch": e.branch.code,
+                        "effective_time": e.effective_time,
+                        "location_status": e.location_status,
+                        "location_reason": e.location_reason,
+                        "event_status": e.event_status,
+                        "flags": e.flags,
+                        "connection_mode": e.connection_mode,
+                    }
+                    for e in events
+                ],
+                "open_session": (
+                    {
+                        "id": open_session.id,
+                        "branch": open_session.branch.code,
+                        "check_in_at": open_session.check_in_event.effective_time
+                        if open_session.check_in_event
+                        else None,
+                        "shift_date": open_session.shift_date,
+                    }
+                    if open_session
+                    else None
+                ),
+            }
+        )
+
+
+class OvertimeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
+                              viewsets.GenericViewSet):
+    """Overtime approvals (calculation-rules §7.3).
+
+    Employees see their own proposals; BRANCH_MANAGER sees their branches;
+    HR/ADMIN see everything. POST /attendance/overtime/approve/ decides.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    DECIDER_ROLES = ("BRANCH_MANAGER", "REGION_MANAGER", "HR", "ADMIN")
+
+    def get_queryset(self):
+        user: User = self.request.user
+        if user.is_superuser or user.has_role("HR") or user.has_role("ADMIN") or user.has_role("REGION_MANAGER"):
+            qs = OvertimeProposal.objects.all()
+        elif user.has_role("BRANCH_MANAGER"):
+            branch_ids = list(
+                user.role_assignments.filter(role__code="BRANCH_MANAGER").values_list("branch_id", flat=True)
+            )
+            qs = OvertimeProposal.objects.filter(branch_id__in=branch_ids)
+        else:
+            qs = OvertimeProposal.objects.filter(employee=user.employee)
+        return qs.select_related("employee", "branch", "session")
+
+    def list(self, request, *args, **kwargs):
+        status_filter = request.query_params.get("status")
+        qs = self.get_queryset().order_by("-shift_date", "-id")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        page = self.paginate_queryset(qs)
+        data = [
+            {
+                "id": p.id,
+                "employee": {
+                    "id": p.employee_id,
+                    "personnel_code": p.employee.personnel_code,
+                    "full_name": p.employee.full_name,
+                },
+                "branch": p.branch.code,
+                "shift_date": p.shift_date,
+                "proposed_minutes": p.proposed_minutes,
+                "approved_minutes": p.approved_minutes,
+                "status": p.status,
+                "reason": p.reason,
+                "decided_at": p.decided_at,
+            }
+            for p in page
+        ]
+        return self.get_paginated_response(data)
+
+    @action(detail=False, methods=["post"], url_path="approve")
+    def approve(self, request):
+        """POST {id, approved_minutes?} — the §7.3 manager decision."""
+        user: User = request.user
+        if not (user.is_superuser or any(user.has_role(r) for r in self.DECIDER_ROLES)):
+            return Response({"detail": "دسترسی تأیید اضافه‌کاری ندارید.", "code": "FORBIDDEN"}, status=403)
+        proposal_id = request.data.get("id")
+        try:
+            proposal = self.get_queryset().get(id=proposal_id)
+        except OvertimeProposal.DoesNotExist:
+            return Response({"detail": "پیشنهاد یافت نشد.", "code": "NOT_FOUND"}, status=404)
+        if proposal.status == SegmentStatus.APPROVED:
+            return Response({"detail": "این پیشنهاد قبلاً تأیید شده است.", "code": "ALREADY_DECIDED"}, status=409)
+        approved = request.data.get("approved_minutes", proposal.proposed_minutes)
+        try:
+            approved = int(approved)
+        except (TypeError, ValueError):
+            return Response({"detail": "approved_minutes نامعتبر است.", "code": "INVALID"}, status=400)
+        if not (0 < approved <= proposal.proposed_minutes):
+            return Response(
+                {"detail": f"مقدار تأیید باید بین ۱ و {proposal.proposed_minutes} باشد.", "code": "INVALID"},
+                status=400,
+            )
+        proposal.status = SegmentStatus.APPROVED
+        proposal.approved_minutes = approved
+        proposal.decided_by = user
+        proposal.decided_at = timezone.now()
+        proposal.save(update_fields=["status", "approved_minutes", "decided_by", "decided_at", "updated_at"])
+
+        from apps.core.jalali import jalali_period_of
+        from apps.reports.services import recompute_month_summary
+
+        # Roll up the month the overtime BELONGS to (shift_date), not the
+        # decision date — a Mehr overtime approved in Aban updates Mehr.
+        jy, jm = jalali_period_of(proposal.shift_date)
+        recompute_month_summary(proposal.employee_id, proposal.branch_id, jy, jm)
+        return Response({"id": proposal.id, "status": proposal.status, "approved_minutes": approved})

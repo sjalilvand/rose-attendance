@@ -6,6 +6,8 @@ from rest_framework.routers import DefaultRouter
 from apps.attendance.api import (
     AttendanceEventViewSet,
     AttendanceSessionViewSet,
+    DailyBoardViewSet,
+    OvertimeProposalViewSet,
     ReviewQueueViewSet,
 )
 from apps.people.api import MeView, TokenObtainPairWithLockoutView, TokenRefreshView
@@ -15,6 +17,8 @@ from apps.ops.api import HealthView
 router = DefaultRouter()
 router.register("attendance/events", AttendanceEventViewSet, basename="attendance-events")
 router.register("attendance/sessions", AttendanceSessionViewSet, basename="attendance-sessions")
+router.register("attendance/daily", DailyBoardViewSet, basename="attendance-daily")
+router.register("attendance/overtime", OvertimeProposalViewSet, basename="attendance-overtime")
 router.register("attendance/review-queue", ReviewQueueViewSet, basename="review-queue")
 router.register("reports/monthly-summaries", MonthlySummaryViewSet, basename="monthly-summaries")
 

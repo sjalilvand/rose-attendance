@@ -11,6 +11,7 @@ Implements docs/analysis/02-calculation-rules.md §3 (pairing) and §4
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import dataclass, field
 
 from django.conf import settings
@@ -31,6 +32,8 @@ from apps.core.geodesy import haversine_m
 from apps.scheduling.models import ScheduledShift
 
 from .models import AttendanceAdjustment, AttendanceEvent, AttendanceSession
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +305,24 @@ def rebuild_pairings(employee_id: int, branch_id: int) -> None:
 # ---------------------------------------------------------------------------
 # Ingestion API used by views
 # ---------------------------------------------------------------------------
+def refresh_summary_after_punch(employee, branch, effective_time) -> None:
+    """Pipeline activation point 1 (calculation §2): refresh the Jalali-month
+    summary of the (person, branch) stream right after a punch/sync.
+
+    Kept inline for freshness on the single-host deployment; under heavy
+    punch storms this can be switched to the nightly Celery safety net.
+    Never breaks the punch itself.
+    """
+    try:
+        from apps.core.jalali import jalali_period_of
+        from apps.reports.services import recompute_month_summary
+
+        jy, jm = jalali_period_of(effective_time)
+        recompute_month_summary(employee.id, branch.id, jy, jm)
+    except Exception:  # pragma: no cover — punch must never fail on rollup
+        log.exception("summary refresh failed for emp=%s branch=%s", employee.id, branch.id)
+
+
 @transaction.atomic
 def receive_punch(*, employee, branch, event_type: str, event_uuid,
                   device_time: dt.datetime | None, connection_mode: str,
@@ -351,6 +372,7 @@ def receive_punch(*, employee, branch, event_type: str, event_uuid,
         client_request_id=client_request_id,
     )
     apply_event_to_pairing(event)
+    refresh_summary_after_punch(employee, branch, event.effective_time)
     return event, True
 
 

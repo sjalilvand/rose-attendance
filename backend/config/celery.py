@@ -19,9 +19,16 @@ app.autodiscover_tasks()
 
 app.conf.beat_schedule = {
     "recompute-nightly": {
-        # Recompute yesterday + today for all active employees (step 1 of pipeline).
+        # Recompute yesterday + today for all active employees (step 1 of pipeline)
+        # + refresh current Jalali month summaries of recently active streams.
         "task": "apps.attendance.tasks.recompute_nightly",
         "schedule": crontab(hour=1, minute=30),
+    },
+    "monthly-recompute-guard": {
+        # On the first days of each Jalali month, refresh the previous month
+        # for late offline events; closing the period stays an HR action.
+        "task": "apps.reports.tasks.monthly_recompute_guard",
+        "schedule": crontab(hour=2, minute=15),
     },
     "retention-cleanup-dry-run": {
         # Retention sweep (dry run by default; deletion only on closed periods).

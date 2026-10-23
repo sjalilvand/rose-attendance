@@ -92,14 +92,26 @@ class TokenRefreshWithDeviceView(TokenRefreshView):
 
 
 class MeView(APIView):
-    """GET /api/v1/me/ — profile + roles for shell bootstrapping."""
+    """GET /api/v1/me/ — profile + roles + branch geo (PWA bootstrapping)."""
 
     def get(self, request):
+        from django.db.models import Q
+
         user: User = request.user
         employee = user.employee
+        today = timezone.localdate()
+        branches = []
+        if employee.home_branch is not None:
+            branches.append((employee.home_branch, True))
+        assigned = employee.branch_assignments.filter(
+            is_allowed=True, valid_from__lte=today
+        ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today)).select_related("branch")
+        for assignment in assigned:
+            branches.append((assignment.branch, False))
         return Response(
             {
                 "username": user.username,
+                "server_time": timezone.now(),
                 "employee": {
                     "id": employee.id,
                     "personnel_code": employee.personnel_code,
@@ -110,5 +122,16 @@ class MeView(APIView):
                     "home_branch_id": employee.home_branch_id,
                 },
                 "roles": user.active_role_codes(),
+                "branches": [
+                    {
+                        "code": branch.code,
+                        "name": branch.name,
+                        "geo_latitude": branch.geo_latitude,
+                        "geo_longitude": branch.geo_longitude,
+                        "geo_radius_m": branch.geo_radius_m,
+                        "is_home": is_home,
+                    }
+                    for branch, is_home in branches
+                ],
             }
         )

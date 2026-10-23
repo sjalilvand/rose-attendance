@@ -1,0 +1,26 @@
+{
+  "name": "rose-attendance-pwa",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "PWA سامانه حضور و غیاب رز سفید — ثبت تردد آنلاین/آفلاین، کارکرد و خلاصه ماهانه",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "idb": "^8.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "~5.6.3",
+    "vite": "^5.4.10",
+    "vite-plugin-pwa": "^0.20.5"
+  }
+}

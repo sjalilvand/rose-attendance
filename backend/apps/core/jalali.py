@@ -32,11 +32,31 @@ def jalali_period_of(moment: dt.datetime) -> tuple[int, int]:
 
 
 def _jalali_days_in_month(jy: int, jm: int) -> int:
+    """Length of a Jalali month (29/30/31) — bugfix: the previous version
+    returned the Gregorian day-of-month of the month's last day instead of
+    the Jalali day count (caught by tests when 1405/07 returned 22 not 30)."""
     if jm < 12:
         nxt = jdatetime.date(jy, jm + 1, 1)
     else:
         nxt = jdatetime.date(jy + 1, 1, 1)
-    return (nxt.togregorian() - dt.timedelta(days=1)).day
+    last_day = nxt.togregorian() - dt.timedelta(days=1)
+    return jdatetime.date.fromgregorian(date=last_day).day
+
+
+def jalali_month_range(jy: int, jm: int) -> tuple[dt.date, dt.date]:
+    """Gregorian (first_day, last_day) of a Jalali month (decision #2 of §34).
+
+    Monthly summary periods, month closures and day iteration all use these
+    boundaries — e.g. 1405/07 spans 2026-09-23 .. 2026-10-22.
+    """
+    first = jdatetime.date(jy, jm, 1).togregorian()
+    last = jdatetime.date(jy, jm, _jalali_days_in_month(jy, jm)).togregorian()
+    return first, last
+
+
+def current_jalali_period(moment: dt.datetime | None = None) -> tuple[int, int]:
+    """(period_year, period_month) of «now» in Tehran local time."""
+    return jalali_period_of(moment or djtz.now())
 
 
 def subtract_jalali_months(moment: dt.datetime, months: int) -> dt.datetime:

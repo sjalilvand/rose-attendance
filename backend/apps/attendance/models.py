@@ -22,6 +22,7 @@ from apps.core.enums import (
     EventStatus,
     EventType,
     LocationStatus,
+    SegmentStatus,
     SessionState,
 )
 from apps.core.models import TimeStampedModel
@@ -176,3 +177,51 @@ class AttendanceAdjustment(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"{self.adjustment_kind} by {self.decided_by_id} @ {self.decided_at:%Y-%m-%d}"
+
+
+class OvertimeProposal(TimeStampedModel):
+    """Overtime approval unit — calculation-rules §7.3.
+
+    Mere difference between checkout and planned_end is NOT counted
+    (explicit rule of the requirements document): the engine proposes
+    overtime from sessions extending beyond `planned_end`, the branch
+    manager decides, and only approved minutes enter monthly summaries.
+    """
+
+    session = models.OneToOneField(
+        AttendanceSession, on_delete=models.PROTECT, related_name="overtime_proposal"
+    )
+    employee = models.ForeignKey(
+        "people.Employee", on_delete=models.PROTECT, related_name="overtime_proposals"
+    )
+    branch = models.ForeignKey(
+        "orgs.Branch", on_delete=models.PROTECT, related_name="overtime_proposals"
+    )
+    shift_date = models.DateField(db_index=True)
+    proposed_minutes = models.PositiveIntegerField()
+    approved_minutes = models.PositiveIntegerField(null=True, blank=True)
+    status = models.CharField(
+        max_length=12, choices=SegmentStatus.choices, default=SegmentStatus.PENDING
+    )
+    basis = models.CharField(max_length=30, default="AUTO_BEYOND_PLANNED_END")
+    reason = models.CharField(max_length=200, blank=True)
+    decided_by = models.ForeignKey(
+        "people.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="overtime_decisions"
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "overtime_proposals"
+        verbose_name = "پیشنهاد اضافه‌کاری"
+        verbose_name_plural = "پیشنهادهای اضافه‌کاری"
+        indexes = [
+            models.Index(
+                fields=["branch", "status"],
+                condition=models.Q(status="PENDING"),
+                name="idx_ot_pending",
+            ),
+            models.Index(fields=["employee", "shift_date"], name="idx_ot_emp_date"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"OT#{self.id} emp={self.employee_id} {self.shift_date} {self.status}"
