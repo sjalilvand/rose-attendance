@@ -190,8 +190,10 @@ export function formatJalaliDateTime(iso: string | null | undefined): string {
 
 export function minutesToHM(minutes: number | null | undefined): string {
   if (minutes === null || minutes === undefined) return '—'
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
+  const sign = minutes < 0 ? '-' : ''
+  const abs = Math.abs(Math.trunc(minutes))
+  const h = Math.floor(abs / 60)
+  const m = abs % 60
   if (h === 0) return faDigits(`${m} دقیقه`)
-  return faDigits(`${h}:${String(m).padStart(2, '0')}`)
+  return faDigits(`${sign}${h}:${String(m).padStart(2, '0')}`)
 }

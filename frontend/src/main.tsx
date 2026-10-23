@@ -11,6 +11,7 @@ import SummaryPage from './pages/SummaryPage'
 import RequestsPage from './pages/RequestsPage'
 import ApprovalsPage from './pages/ApprovalsPage'
 import ImportPage from './pages/ImportPage'
+import OrgPage from './pages/OrgPage'
 import SettingsPage from './pages/SettingsPage'
 import './styles.css'
 
@@ -86,6 +87,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ImportPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/org"
+        element={
+          <RequireAuth>
+            <OrgPage />
           </RequireAuth>
         }
       />

@@ -9,22 +9,31 @@ Contract (section 11 + decision #5):
 - POST /requests/queue/decide/  APPROVE / REJECT one segment
 - GET  /leave-types/            active leave types (form dropdown)
 
-Leave balances are not mutated yet (pending HR opening balances); see
-leaves/services docstring.
+LeaveLedger API (HR increment):
+- GET  /leaves/ledger/balances/?employee=   per-type balances (self or HR)
+- GET  /leaves/ledger/?employee=            raw ledger rows (HR/ADMIN)
+- POST /leaves/ledger/seed/                 bulk OPENING/ACCRUAL/ADJUST + dry-run
+- POST /leaves/ledger/adjust/               single ADJUST entry
 """
 from __future__ import annotations
 
-from rest_framework import mixins, serializers, viewsets
+from django.db import transaction
+from django.db.models import Sum
+from django.utils import timezone
+from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.core.enums import ApprovalAction, RequestStatus, SegmentStatus
+from apps.core.api_utils import hr_write_guard
+from apps.core.enums import ApprovalAction, LeaveEntryKind, RequestStatus, SegmentStatus
 from apps.core.rbac import is_manager, scoped_branch_ids
 from apps.orgs.models import Branch
-from apps.people.models import User
+from apps.people.models import Employee, User
+from rest_framework.throttling import ScopedRateThrottle
 
-from .models import LeaveRequest, LeaveType, MissionRequest, RequestSegment
+from . import ledger as ledger_svc
+from .models import LeaveLedger, LeaveRequest, LeaveType, MissionRequest, RequestSegment
 from .services import (
     RequestError,
     cancel_request,
@@ -229,6 +238,23 @@ class RequestQueueViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             "leave_request__employee",
             "mission_request__employee",
         ).order_by("starts_at", "id")[:200]
+        # One grouped query for every LEAVE row's tracked balance — the
+        # approver sees «مانده» next to each request (None = untracked).
+        balance_map: dict[tuple[int, int], int] = {}
+        leave_pairs = [
+            (segment.leave_request.employee_id, segment.leave_request.leave_type_id)
+            for segment in segments
+            if segment.leave_request_id
+        ]
+        if leave_pairs:
+            emp_ids = {pair[0] for pair in leave_pairs}
+            type_ids = {pair[1] for pair in leave_pairs}
+            sums = (
+                LeaveLedger.objects.filter(employee_id__in=emp_ids, leave_type_id__in=type_ids)
+                .values("employee_id", "leave_type_id")
+                .annotate(total=Sum("minutes"))
+            )
+            balance_map = {(s["employee_id"], s["leave_type_id"]): int(s["total"] or 0) for s in sums}
         items = []
         for segment in segments:
             if segment.leave_request_id:
@@ -240,6 +266,9 @@ class RequestQueueViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "leave_type": request_obj.leave_type.code,
                     "leave_type_name": request_obj.leave_type.name,
                     "description": request_obj.description,
+                    "employee_balance_minutes": balance_map.get(
+                        (employee.id, request_obj.leave_type_id)
+                    ),
                 }
             else:
                 request_obj = segment.mission_request
@@ -303,3 +332,281 @@ class RequestQueueViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 "overall_status": request_obj.overall_status,
             }
         )
+
+
+def _serialize_ledger_entry(entry: LeaveLedger) -> dict:
+    return {
+        "id": entry.id,
+        "leave_type": entry.leave_type.code,
+        "leave_type_name": entry.leave_type.name,
+        "entry_kind": entry.entry_kind,
+        "minutes": entry.minutes,
+        "balance_after_minutes": entry.balance_after_minutes,
+        "basis_date": entry.basis_date,
+        "source_type": entry.source_type,
+        "source_id": entry.source_id,
+        "created_at": entry.created_at,
+    }
+
+
+class LeaveLedgerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """LeaveLedger API — balances for everyone, stream + seeding for HR.
+
+    - GET  ?employee=PERSONNEL_CODE  raw rows, newest first (HR/ADMIN only)
+    - GET  .../balances/ ?employee=  per-type balances; employees see their
+      own, managers/HR may query anyone via ?employee=
+    - POST .../seed/                 bulk append {personnel_code, leave_type,
+      minutes, entry_kind?, basis_date?} rows with dry_run — 1404/01/01 style
+      Jalali dates accepted; per-row errors, good rows still land
+    - POST .../adjust/               single ADJUST (signed minutes)
+    """
+
+    permission_classes = [IsAuthenticated]
+    # Bulk seeding shares the personnel-import bucket (10/min per user);
+    # other actions of this viewset stay unthrottled like the rest of /api/v1.
+    throttle_scope = "import"
+
+    def get_throttles(self):
+        if self.action == "seed":
+            return [ScopedRateThrottle()]
+        return []
+
+    def _employee_or_response(self, personnel_code: str):
+        employee = Employee.objects.filter(personnel_code=personnel_code).first()
+        if employee is None:
+            return None, Response(
+                {"detail": f"پرسنلی با کد «{personnel_code}» یافت نشد.", "code": "NOT_FOUND"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return employee, None
+
+    def _self_employee_or_response(self, user: User):
+        if not user.employee_id:
+            return None, Response(
+                {
+                    "detail": "این حساب پروندهٔ پرسنلی ندارد؛ پارامتر employee را بدهید.",
+                    "code": "NO_EMPLOYEE",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return user.employee, None
+
+    def list(self, request, *args, **kwargs):
+        forbidden = hr_write_guard(request.user)
+        if forbidden:
+            return forbidden
+        personnel_code = (request.query_params.get("employee") or "").strip()
+        if not personnel_code:
+            return Response(
+                {"detail": "پارامتر employee (کد پرسنلی) الزامی است.", "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        employee, err = self._employee_or_response(personnel_code)
+        if err:
+            return err
+        entries = (
+            LeaveLedger.objects.filter(employee=employee)
+            .select_related("leave_type")
+            .order_by("-id")[:200]
+        )
+        return Response(
+            {
+                "employee": {
+                    "id": employee.id,
+                    "personnel_code": employee.personnel_code,
+                    "full_name": employee.full_name,
+                },
+                "count": len(entries),
+                "results": [_serialize_ledger_entry(entry) for entry in entries],
+            }
+        )
+
+    @action(detail=False, methods=["get"], url_path="balances")
+    def balances(self, request):
+        user: User = request.user
+        personnel_code = (request.query_params.get("employee") or "").strip()
+        if personnel_code:
+            # Global roles may look anyone up; BRANCH_MANAGER sees balances
+            # through the decision-queue embed instead (branch-scoped there).
+            is_global = user.is_superuser or any(
+                user.has_role(role) for role in ("REGION_MANAGER", "HR", "ADMIN")
+            )
+            if not is_global:
+                return Response(
+                    {"detail": "برای استعلام غیر از خودتان دسترسی کافی ندارید.", "code": "FORBIDDEN"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            employee, err = self._employee_or_response(personnel_code)
+            if err:
+                return err
+        else:
+            employee, err = self._self_employee_or_response(user)
+            if err:
+                return err
+        return Response(
+            {
+                "employee": {
+                    "id": employee.id,
+                    "personnel_code": employee.personnel_code,
+                    "full_name": employee.full_name,
+                },
+                "balances": ledger_svc.balances_for(employee),
+            }
+        )
+
+    @action(detail=False, methods=["post"], url_path="seed")
+    def seed(self, request):
+        forbidden = hr_write_guard(request.user)
+        if forbidden:
+            return forbidden
+        payload = request.data if isinstance(request.data, dict) else {}
+        items = payload.get("items") if isinstance(payload, dict) else request.data
+        if not isinstance(items, list):
+            return Response({"detail": "آرایهٔ items الزامی است.", "code": "INVALID"}, status=400)
+        if len(items) > ledger_svc.MAX_SEED_ROWS:
+            return Response(
+                {"detail": f"حداکثر {ledger_svc.MAX_SEED_ROWS} ردیف در هر درخواست.", "code": "INVALID"},
+                status=400,
+            )
+        dry_run = isinstance(payload, dict) and str(payload.get("dry_run", "")).lower() in {"1", "true", "yes"}
+
+        errors: list[dict] = []
+        wanted_codes = {
+            str(raw.get("personnel_code") or "").strip()
+            for raw in items
+            if isinstance(raw, dict) and str(raw.get("personnel_code") or "").strip()
+        }
+        employee_map = {e.personnel_code: e for e in Employee.objects.filter(personnel_code__in=wanted_codes)}
+        type_map = {t.code: t for t in LeaveType.objects.filter(is_active=True)}
+
+        rows: list[dict] = []  # validated rows in order
+        for n, raw in enumerate(items, start=1):
+            if not isinstance(raw, dict):
+                errors.append({"row": n, "personnel_code": "", "message": "هر ردیف باید آبجکت باشد."})
+                continue
+            personnel_code = str(raw.get("personnel_code") or "").strip()
+            employee = employee_map.get(personnel_code)
+            if employee is None:
+                errors.append(
+                    {"row": n, "personnel_code": personnel_code, "message": "کد پرسنلی یافت نشد."}
+                )
+                continue
+            type_code = str(raw.get("leave_type") or "").strip()
+            leave_type = type_map.get(type_code)
+            if leave_type is None:
+                errors.append(
+                    {"row": n, "personnel_code": personnel_code,
+                     "message": f"نوع مرخصی فعال «{type_code}» یافت نشد."}
+                )
+                continue
+            entry_kind = str(raw.get("entry_kind") or LeaveEntryKind.OPENING).strip().upper()
+            if entry_kind not in ledger_svc.SEED_KINDS:
+                errors.append(
+                    {"row": n, "personnel_code": personnel_code,
+                     "message": f"نوع گردش باید یکی از {', '.join(ledger_svc.SEED_KINDS)} باشد."}
+                )
+                continue
+            try:
+                minutes = int(raw.get("minutes"))
+            except (TypeError, ValueError):
+                errors.append(
+                    {"row": n, "personnel_code": personnel_code, "message": "minutes عدد صحیح الزامی است."}
+                )
+                continue
+            if minutes == 0 or (minutes < 0 and entry_kind != LeaveEntryKind.ADJUST):
+                errors.append(
+                    {"row": n, "personnel_code": personnel_code,
+                     "message": "minutes باید مخالف صفر باشد؛ مقدار منفی فقط برای ADJUST."}
+                )
+                continue
+            try:
+                basis_date = ledger_svc.parse_basis_date(raw.get("basis_date")) or timezone.localdate()
+            except ledger_svc.LedgerError as exc:
+                errors.append({"row": n, "personnel_code": personnel_code, "message": exc.message})
+                continue
+            rows.append(
+                {"row": n, "employee": employee, "leave_type": leave_type,
+                 "entry_kind": entry_kind, "minutes": minutes, "basis_date": basis_date}
+            )
+
+        # Running balances per (employee, type) — one grouped query, then in-memory.
+        running: dict[tuple[int, int], int] = {}
+        if rows:
+            emp_ids = {r["employee"].id for r in rows}
+            type_ids = {r["leave_type"].id for r in rows}
+            sums = (
+                LeaveLedger.objects.filter(employee_id__in=emp_ids, leave_type_id__in=type_ids)
+                .values("employee_id", "leave_type_id")
+                .annotate(total=Sum("minutes"))
+            )
+            running = {(s["employee_id"], s["leave_type_id"]): int(s["total"] or 0) for s in sums}
+
+        to_create: list[LeaveLedger] = []
+        for r in rows:
+            key = (r["employee"].id, r["leave_type"].id)
+            running[key] = running.get(key, 0) + r["minutes"]
+            if not dry_run:
+                to_create.append(
+                    LeaveLedger(
+                        employee=r["employee"],
+                        leave_type=r["leave_type"],
+                        entry_kind=r["entry_kind"],
+                        minutes=r["minutes"],
+                        balance_after_minutes=running[key],
+                        basis_date=r["basis_date"],
+                        source_type="HR_SEED",
+                    )
+                )
+        if not dry_run and to_create:
+            with transaction.atomic():
+                LeaveLedger.objects.bulk_create(to_create, batch_size=500)
+
+        return Response(
+            {
+                "total": len(items),
+                "created": len(to_create) if not dry_run else len(rows),
+                "updated": 0,
+                "skipped": len(errors),
+                "errors": errors[:50],
+                "dry_run": dry_run,
+            }
+        )
+
+    @action(detail=False, methods=["post"], url_path="adjust")
+    def adjust(self, request):
+        forbidden = hr_write_guard(request.user)
+        if forbidden:
+            return forbidden
+        personnel_code = str(request.data.get("personnel_code") or "").strip()
+        type_code = str(request.data.get("leave_type") or "").strip()
+        try:
+            minutes = int(request.data.get("minutes"))
+        except (TypeError, ValueError):
+            return Response({"detail": "minutes عدد صحیح الزامی است.", "code": "INVALID"}, status=400)
+        if not personnel_code or not type_code or minutes == 0:
+            return Response(
+                {"detail": "personnel_code، leave_type و minutes (≠۰) الزامی است.", "code": "INVALID"},
+                status=400,
+            )
+        employee, err = self._employee_or_response(personnel_code)
+        if err:
+            return err
+        leave_type = LeaveType.objects.filter(code=type_code, is_active=True).first()
+        if leave_type is None:
+            return Response(
+                {"detail": f"نوع مرخصی فعال «{type_code}» یافت نشد.", "code": "NOT_FOUND"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            basis_date = ledger_svc.parse_basis_date(request.data.get("basis_date")) or timezone.localdate()
+        except ledger_svc.LedgerError as exc:
+            return Response({"detail": exc.message, "code": exc.code}, status=400)
+        entry = ledger_svc.append_entry(
+            employee=employee,
+            leave_type=leave_type,
+            entry_kind=LeaveEntryKind.ADJUST,
+            minutes=minutes,
+            basis_date=basis_date,
+            source_type="HR_ADJUST",
+        )
+        return Response(_serialize_ledger_entry(entry), status=201)

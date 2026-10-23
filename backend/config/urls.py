@@ -10,7 +10,8 @@ from apps.attendance.api import (
     OvertimeProposalViewSet,
     ReviewQueueViewSet,
 )
-from apps.leaves.api import LeaveTypeViewSet, RequestQueueViewSet, RequestsViewSet
+from apps.leaves.api import LeaveLedgerViewSet, LeaveTypeViewSet, RequestQueueViewSet, RequestsViewSet
+from apps.orgs.api import BranchViewSet, RegionViewSet
 from apps.people.api import (
     MeView,
     PersonnelImportTemplateView,
@@ -20,6 +21,7 @@ from apps.people.api import (
 )
 from apps.reports.api import ManagerBoardViewSet, MonthlySummaryViewSet
 from apps.ops.api import HealthView
+from apps.scheduling.api import ShiftViewSet
 
 router = DefaultRouter()
 router.register("attendance/events", AttendanceEventViewSet, basename="attendance-events")
@@ -32,6 +34,10 @@ router.register("reports/manager-board", ManagerBoardViewSet, basename="manager-
 router.register("requests", RequestsViewSet, basename="requests")
 router.register("requests/queue", RequestQueueViewSet, basename="request-queue")
 router.register("leave-types", LeaveTypeViewSet, basename="leave-types")
+router.register("org/regions", RegionViewSet, basename="org-regions")
+router.register("org/branches", BranchViewSet, basename="org-branches")
+router.register("scheduling/shifts", ShiftViewSet, basename="scheduling-shifts")
+router.register("leaves/ledger", LeaveLedgerViewSet, basename="leave-ledger")
 
 api_v1 = [
     path("auth/token/", TokenObtainPairWithLockoutView.as_view(), name="token-obtain-pair"),

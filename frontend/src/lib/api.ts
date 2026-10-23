@@ -332,6 +332,8 @@ export interface QueueItem {
   starts_at: string
   ends_at: string
   computed_minutes: number
+  /** ماندهٔ ردیابی‌شدهٔ پرسنل برای همین نوع مرخصی؛ null یعنی ردیابی‌نشده */
+  employee_balance_minutes?: number | null
   leave_type?: string
   leave_type_name?: string
   description?: string
@@ -496,4 +498,178 @@ export async function downloadImportTemplate(): Promise<void> {
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+// ---------------------------------------------------------------------------
+// Org management — regions / branches / shifts (HR/ADMIN), phase-2 step 5
+// ---------------------------------------------------------------------------
+export interface OrgRegion {
+  id: number
+  code: string
+  name: string
+  is_active: boolean
+  branches_count: number
+}
+
+export interface OrgBranch {
+  id: number
+  code: string
+  name: string
+  region_code: string
+  region_name: string
+  province: string
+  city: string
+  address: string
+  phone: string
+  geo_latitude: number | null
+  geo_longitude: number | null
+  geo_radius_m: number
+  is_active: boolean
+  employee_count: number
+}
+
+export interface OrgShift {
+  id: number
+  code: string
+  name: string
+  starts_at: string
+  ends_at: string
+  crosses_midnight: boolean
+  rest_minutes: number
+  rest_mode: string
+  grace_minutes: number
+  scope_branch: string | null
+  scope_branch_name: string | null
+}
+
+export interface ListResp<T> {
+  count: number
+  page: number
+  page_size: number
+  results: T[]
+}
+
+export interface BulkReport {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  errors: { row: number; code?: string; personnel_code?: string; message: string }[]
+  dry_run: boolean
+}
+
+export function fetchOrgRegions(): Promise<ListResp<OrgRegion>> {
+  return apiFetch('/org/regions/?page_size=200')
+}
+
+export function createRegion(payload: { code: string; name: string }): Promise<OrgRegion> {
+  return apiFetch('/org/regions/', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function fetchOrgBranches(params: {
+  page?: number
+  page_size?: number
+  region?: string
+  search?: string
+  is_active?: string
+}): Promise<ListResp<OrgBranch>> {
+  const q = new URLSearchParams()
+  if (params.page) q.set('page', String(params.page))
+  if (params.page_size) q.set('page_size', String(params.page_size))
+  if (params.region) q.set('region', params.region)
+  if (params.search) q.set('search', params.search)
+  if (params.is_active) q.set('is_active', params.is_active)
+  return apiFetch(`/org/branches/?${q.toString()}`)
+}
+
+export function createBranch(payload: Record<string, unknown>): Promise<OrgBranch> {
+  return apiFetch('/org/branches/', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function fetchOrgShifts(params: {
+  page?: number
+  page_size?: number
+  search?: string
+  branch?: string
+}): Promise<ListResp<OrgShift>> {
+  const q = new URLSearchParams()
+  if (params.page) q.set('page', String(params.page))
+  if (params.page_size) q.set('page_size', String(params.page_size))
+  if (params.search) q.set('search', params.search)
+  if (params.branch) q.set('branch', params.branch)
+  return apiFetch(`/scheduling/shifts/?${q.toString()}`)
+}
+
+export function createShift(payload: Record<string, unknown>): Promise<OrgShift> {
+  return apiFetch('/scheduling/shifts/', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function bulkUpsertBranches(items: Record<string, unknown>[], dryRun: boolean): Promise<BulkReport> {
+  return apiFetch('/org/branches/bulk/', {
+    method: 'POST',
+    body: JSON.stringify({ items, dry_run: dryRun }),
+  })
+}
+
+export function bulkUpsertShifts(items: Record<string, unknown>[], dryRun: boolean): Promise<BulkReport> {
+  return apiFetch('/scheduling/shifts/bulk/', {
+    method: 'POST',
+    body: JSON.stringify({ items, dry_run: dryRun }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// LeaveLedger — tracked balances per (employee, leave_type), section 11
+// ---------------------------------------------------------------------------
+export interface LeaveBalanceRow {
+  leave_type: string
+  leave_type_name: string
+  is_hourly: boolean
+  tracked: boolean
+  balance_minutes: number | null
+  entries: number
+  last_basis_date: string | null
+}
+
+export interface BalancesResp {
+  employee: { id: number; personnel_code: string; full_name: string } | null
+  balances: LeaveBalanceRow[]
+}
+
+export interface LedgerEntry {
+  id: number
+  leave_type: string
+  leave_type_name: string
+  entry_kind: string
+  minutes: number
+  balance_after_minutes: number
+  basis_date: string
+  source_type: string
+}
+
+export function fetchLeaveBalances(employeePc?: string): Promise<BalancesResp> {
+  return apiFetch(`/leaves/ledger/balances/${employeePc ? `?employee=${encodeURIComponent(employeePc)}` : ''}`)
+}
+
+export function fetchLedger(employeePc: string): Promise<{ count: number; results: LedgerEntry[] }> {
+  return apiFetch(`/leaves/ledger/?employee=${encodeURIComponent(employeePc)}`)
+}
+
+export function seedLedger(
+  items: { personnel_code: string; leave_type: string; minutes: number; basis_date?: string; entry_kind?: string }[],
+  dryRun: boolean,
+): Promise<BulkReport> {
+  return apiFetch('/leaves/ledger/seed/', {
+    method: 'POST',
+    body: JSON.stringify({ items, dry_run: dryRun }),
+  })
+}
+
+export function adjustLedger(payload: {
+  personnel_code: string
+  leave_type: string
+  minutes: number
+  basis_date?: string
+}): Promise<LedgerEntry> {
+  return apiFetch('/leaves/ledger/adjust/', { method: 'POST', body: JSON.stringify(payload) })
 }

@@ -28,7 +28,7 @@ python3 -m venv /path/to/venv && source /path/to/venv/bin/activate
 pip install -r requirements.in          # برای توسعه
 python manage.py migrate
 python manage.py createsuperuser
-python manage.py test                   # ۱۱۰ تست خط لوله تردد، محاسبات، درخواست‌ها، ورود گروهی و WebSocket
+python manage.py test                   # ۱۳۳ تست خط لوله تردد، محاسبات، درخواست‌ها، ورود گروهی، WebSocket، مدیریت سازمان و ماندهٔ مرخصی
 python manage.py runserver
 ```
 
@@ -51,6 +51,15 @@ python manage.py runserver
 | `/api/v1/attendance/review-queue/` | GET | صف NEEDS_REVIEW برای مدیر شعبه/منابع انسانی |
 | `/api/v1/attendance/review-queue/approve/` | POST | تأیید زمان مؤثر با لایه TIME_FIX (بدون بازنویسی تاریخچه) |
 | `/api/v1/reports/monthly-summaries/` | GET | خلاصه‌های ماهانه (نگهداری ≥ ۲۴ ماه) |
+| `/api/v1/org/regions/` | GET/POST/PATCH | مدیریت مناطق (نوشتن HR/ADMIN) |
+| `/api/v1/org/branches/` | GET/POST/PATCH | مدیریت شعب با فیلتر/جست‌وجو/صفحه‌بندی (نوشتن HR/ADMIN) |
+| `/api/v1/org/branches/bulk/` | POST | upsert گروهی شعب بر مبنای کد + dry run |
+| `/api/v1/scheduling/shifts/` | GET/POST/PATCH | کاتالوگ شیفت‌ها (نوشتن HR/ADMIN) |
+| `/api/v1/scheduling/shifts/bulk/` | POST | upsert گروهی شیفت‌ها + dry run |
+| `/api/v1/leaves/ledger/balances/` | GET | ماندهٔ هر نوع مرخصی (خود شخص؛ مدیران سراسری با `employee=`) |
+| `/api/v1/leaves/ledger/` | GET | گردش‌های دفتر مانده یک پرسنل (HR/ADMIN) |
+| `/api/v1/leaves/ledger/seed/` | POST | ثبت گروهی مانده اولیه/استحقاق/تعدیل با تاریخ شمسی + dry run (HR/ADMIN) |
+| `/api/v1/leaves/ledger/adjust/` | POST | تعدیل سریع مانده با دقیقهٔ مثبت/منفی (HR/ADMIN) |
 | `/api/v1/health/` | GET | سلامت DB/Redis برای پروکسی |
 
 ## متغیرهای محیطی آستانه‌دار (مصوب ۲٫۱)
@@ -76,6 +85,6 @@ python manage.py runserver
 
 ## تست‌ها
 
-۷۱ تست پوشش‌دهنده: برچسب‌گذاری ژئوفنس (۱۵۰/۳۰۰ متر و بازه ۵۰–۱۰۰۰)، انحراف ساعت آنلاین/آفلاین، آستانه ۷ روز، idempotency، قواعد جفت‌سازی (کامل/باز/ترتیب نامعتبر/ورود تکراری/شیفت شب)، تکرارپذیری بازسازی، قفل حساب و جریان رسیدگی مدیر؛ به‌علاوه موتور محاسبه (مهلت و پله‌های تأخیر، سه حالت استراحت، سقف/گردکردن/حداقل بلوک اضافه‌کاری، شیفت شب، تعطیل)، رول‌آپ شمسی (مرز ۱۴۰۵/۰۷، ارفاق، تأیید اضافه‌کاری، اولویت حضور/مرخصی)، کنترل‌های بستن دوره و APIهای تازه.
+۱۳۳ تست پوشش‌دهنده: برچسب‌گذاری ژئوفنس (۱۵۰/۳۰۰ متر و بازه ۵۰–۱۰۰۰)، انحراف ساعت آنلاین/آفلاین، آستانه ۷ روز، idempotency، قواعد جفت‌سازی (کامل/باز/ترتیب نامعتبر/ورود تکراری/شیفت شب)، تکرارپذیری بازسازی، قفل حساب و جریان رسیدگی مدیر؛ به‌علاوه موتور محاسبه، رول‌آپ شمسی، کنترل‌های بستن دوره، APIهای درخواست‌ها و رسیدگی، ورود گروهی پرسنل، WebSocket، و گام ۵ (CRUD و upsert گروهی شعب/شیفت‌ها با تفکیک دسترسی HR، و چرخهٔ کامل LeaveLedger: ثبت مانده، گارد مانده در ثبت، کسر خودکار در تأیید و مانده در صف رسیدگی).
 
 </div>

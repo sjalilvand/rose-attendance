@@ -619,3 +619,15 @@ select:focus {
 .err-table th, .err-table td { text-align: right; padding: 6px 8px; border-bottom: 1px solid #eee2d9; }
 .guide-row { display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid #f2eae2; }
 .guide-row:last-child { border-bottom: none; }
+
+/* ---------------------------------------------------------------------------
+   Org management page (branches/shifts/regions) + leave balances
+--------------------------------------------------------------------------- */
+.data-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+.data-table th, .data-table td { text-align: right; padding: 7px 8px; border-bottom: 1px solid #eee2d9; }
+.data-table th { color: var(--muted); font-weight: 600; }
+.bulk-area { width: 100%; resize: vertical; font-size: 12.5px; line-height: 1.9; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.balance-chips { margin: 0 0 10px; }
+.warn-text { color: #b3261e; font-weight: 700; }
+details > summary { cursor: pointer; }

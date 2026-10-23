@@ -126,6 +126,15 @@ function RequestQueue() {
             {formatJalaliDateTime(item.starts_at)} تا {formatJalaliDateTime(item.ends_at)} ·{' '}
             {minutesToHM(item.computed_minutes)}
           </div>
+          {item.kind === 'LEAVE' && item.employee_balance_minutes != null && (
+            <div className="muted">
+              ماندهٔ {item.leave_type_name ?? 'مرخصی'} پرسنل:{' '}
+              <span className={item.employee_balance_minutes < item.computed_minutes ? 'warn-text' : ''}>
+                {minutesToHM(item.employee_balance_minutes)}
+              </span>
+              {item.employee_balance_minutes < item.computed_minutes && ' — کسری مانده؛ پس از تأیید منفی می‌شود'}
+            </div>
+          )}
           {item.description && <div className="muted">توضیح: {item.description}</div>}
           <label className="field-row">
             <span>توضیح تصمیم (اختیاری)</span>

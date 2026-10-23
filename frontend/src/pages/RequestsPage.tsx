@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   cancelRequest,
+  fetchLeaveBalances,
   fetchLeaveTypes,
   fetchMyRequests,
   submitLeave,
   submitMission,
+  type LeaveBalanceRow,
   type LeaveTypeInfo,
   type MyRequest,
 } from '../lib/api'
@@ -32,6 +34,7 @@ function toIso(value: string): string {
 
 export default function RequestsPage() {
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeInfo[]>([])
+  const [balances, setBalances] = useState<LeaveBalanceRow[]>([])
   const [items, setItems] = useState<MyRequest[]>([])
   const [kind, setKind] = useState<'LEAVE' | 'MISSION'>('LEAVE')
   const [leaveTypeCode, setLeaveTypeCode] = useState('')
@@ -46,9 +49,14 @@ export default function RequestsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [types, mine] = await Promise.all([fetchLeaveTypes(), fetchMyRequests()])
+      const [types, mine, balanceResp] = await Promise.all([
+        fetchLeaveTypes(),
+        fetchMyRequests(),
+        fetchLeaveBalances().catch(() => null), // admin بدون پروندهٔ پرسنلی
+      ])
       setLeaveTypes(types.results)
       setItems(mine.results)
+      if (balanceResp) setBalances(balanceResp.balances)
       if (types.results.length > 0) {
         setLeaveTypeCode((prev) => prev || types.results[0].code)
       }
@@ -114,6 +122,21 @@ export default function RequestsPage() {
   return (
     <div className="page">
       <h2 className="h">درخواست‌ها</h2>
+
+      {balances.some((b) => b.tracked) && (
+        <div className="chips balance-chips">
+          {balances
+            .filter((b) => b.tracked)
+            .map((b) => (
+              <span
+                key={b.leave_type}
+                className={`chip ${(b.balance_minutes ?? 0) < 0 ? 'chip-danger' : 'chip-info'}`}
+              >
+                ماندهٔ {b.leave_type_name}: {minutesToHM(b.balance_minutes ?? 0)}
+              </span>
+            ))}
+        </div>
+      )}
 
       <div className="card">
         <form onSubmit={onSubmit}>

@@ -5,9 +5,11 @@ per-(branch × interval) segments; each segment is decided independently and
 the overall status is composed — any REJECTED → REJECTED, else all APPROVED
 → APPROVED, else PENDING. Cancellation clears every segment to CANCELLED.
 
-Leave balances (LeaveLedger) are intentionally NOT mutated yet: opening
-balances await the HR workbook import (pending employer input, phase-2
-checklist). Once seeded, APPROVE should append a DEDUCTION entry here.
+Leave balances (LeaveLedger) are ACTIVE as of the HR increment:
+- submit_leave() enforces the tracked balance when the (employee, type) pair
+  has ledger entries — untracked types pass silently (ledger.py)
+- decide_segment(APPROVE) on a LEAVE segment appends a DEDUCTION entry
+  atomically with the decision (ledger.apply_segment_decision)
 
 The calculation engine already consumes APPROVED segments (reports/services
 _load_leave_spans → LeaveSpan), so a decision instantly affects daily rows
@@ -38,6 +40,8 @@ from apps.leaves.models import (
     RequestSegment,
 )
 from apps.people.models import Employee, User
+
+from .ledger import LedgerError, apply_segment_decision, enforce_sufficient_balance
 
 MAX_REQUEST_DAYS = 180  # sanity cap against accidental year-long requests
 
@@ -115,13 +119,18 @@ def submit_leave(
     description: str = "",
 ) -> LeaveRequest:
     starts_at, ends_at = _validated_window(starts_at, ends_at)
+    computed = int((ends_at - starts_at).total_seconds() // 60)
+    try:
+        enforce_sufficient_balance(employee, leave_type, computed)
+    except LedgerError as exc:
+        raise RequestError(exc.message, exc.code)
     with transaction.atomic():
         request_obj = LeaveRequest.objects.create(
             employee=employee,
             leave_type=leave_type,
             starts_at=starts_at,
             ends_at=ends_at,
-            computed_minutes=int((ends_at - starts_at).total_seconds() // 60),
+            computed_minutes=computed,
             description=description[:2000],
             overall_status=RequestStatus.PENDING,
         )
@@ -224,6 +233,8 @@ def decide_segment(
         segment.save(update_fields=["segment_status", "updated_at"])
         request_obj = segment.leave_request or segment.mission_request
         compose_overall(request_obj)
+        # Ledger side-effect is atomic with the decision (section 11).
+        apply_segment_decision(segment, action)
     _refresh_summary(segment)
 
     from apps.messaging.services import notify_employee
