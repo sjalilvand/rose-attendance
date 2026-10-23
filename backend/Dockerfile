@@ -10,10 +10,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       libpq5 libgdal32 libgeos-c1v5 \
-    && rm -rf /var/lib/apt/lists/*
+# GeoDjango runtime libraries. The soname package names differ between
+# Debian releases (bookworm: libgdal32 + libgeos-c1v5; trixie: libgdal36 +
+# libgeos-c1t64) and python:3.12-slim now tracks trixie — resolve them
+# dynamically from the apt cache instead of hard-coding a release.
+RUN set -eux; \
+    apt-get update; \
+    GDAL_PKG="$(apt-cache pkgnames libgdal | grep -E '^libgdal[0-9]+$' | sort -V | tail -n 1)"; \
+    GEOS_PKG="$(apt-cache pkgnames libgeos-c1 | grep -E '^libgeos-c1([vt][0-9]+)?$' | sort -V | tail -n 1)"; \
+    echo "GeoDjango runtime: GDAL=${GDAL_PKG} GEOS=${GEOS_PKG}"; \
+    test -n "${GDAL_PKG}" && test -n "${GEOS_PKG}"; \
+    apt-get install -y --no-install-recommends libpq5 "${GDAL_PKG}" "${GEOS_PKG}"; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY requirements.lock /app/requirements.lock
 

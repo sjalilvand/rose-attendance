@@ -97,7 +97,7 @@ cd C:\rose-attendance
 .\update.ps1
 ```
 
-اسکریپت `update.ps1` به‌ترتیب `git pull` → `docker compose build` → `up -d` → مهاجرت دیتابیس را انجام می‌دهد. بدون Docker با `-SkipDocker` اجرا کنید. جایگزین گرافیکی: در **GitHub Desktop** دکمه «Fetch origin → Pull origin» و سپس اجرای همان دستورات compose.
+اسکریپت `update.ps1` به‌ترتیب `git pull` → آماده‌سازی خودکار `secrets/` و `.env` → `docker compose build` → `up -d` → مهاجرت دیتابیس را انجام می‌دهد (اولین اجرا: فایل‌های secret تصادفی می‌سازد و `localhost` را به ALLOWED_HOSTS اضافه می‌کند). بدون Docker با `-SkipDocker` اجرا کنید. جایگزین گرافیکی: در **GitHub Desktop** دکمه «Fetch origin → Pull origin» و سپس اجرای همان دستورات compose.
 
 ## گام ۲ فاز ۲ چه چیزی اضافه کرد؟
 
