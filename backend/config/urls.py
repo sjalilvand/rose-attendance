@@ -10,8 +10,9 @@ from apps.attendance.api import (
     OvertimeProposalViewSet,
     ReviewQueueViewSet,
 )
+from apps.leaves.api import LeaveTypeViewSet, RequestQueueViewSet, RequestsViewSet
 from apps.people.api import MeView, TokenObtainPairWithLockoutView, TokenRefreshView
-from apps.reports.api import MonthlySummaryViewSet
+from apps.reports.api import ManagerBoardViewSet, MonthlySummaryViewSet
 from apps.ops.api import HealthView
 
 router = DefaultRouter()
@@ -21,6 +22,10 @@ router.register("attendance/daily", DailyBoardViewSet, basename="attendance-dail
 router.register("attendance/overtime", OvertimeProposalViewSet, basename="attendance-overtime")
 router.register("attendance/review-queue", ReviewQueueViewSet, basename="review-queue")
 router.register("reports/monthly-summaries", MonthlySummaryViewSet, basename="monthly-summaries")
+router.register("reports/manager-board", ManagerBoardViewSet, basename="manager-board")
+router.register("requests", RequestsViewSet, basename="requests")
+router.register("requests/queue", RequestQueueViewSet, basename="request-queue")
+router.register("leave-types", LeaveTypeViewSet, basename="leave-types")
 
 api_v1 = [
     path("auth/token/", TokenObtainPairWithLockoutView.as_view(), name="token-obtain-pair"),

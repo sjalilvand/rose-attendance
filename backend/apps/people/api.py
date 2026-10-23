@@ -121,7 +121,9 @@ class MeView(APIView):
                     "employment_status": employee.employment_status,
                     "home_branch_id": employee.home_branch_id,
                 },
-                "roles": user.active_role_codes(),
+                "roles": sorted(
+                    set(user.active_role_codes()) | ({"ADMIN"} if user.is_superuser else set())
+                ),
                 "branches": [
                     {
                         "code": branch.code,

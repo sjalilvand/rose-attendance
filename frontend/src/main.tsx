@@ -8,6 +8,8 @@ import LoginPage from './pages/LoginPage'
 import PunchPage from './pages/PunchPage'
 import HistoryPage from './pages/HistoryPage'
 import SummaryPage from './pages/SummaryPage'
+import RequestsPage from './pages/RequestsPage'
+import ApprovalsPage from './pages/ApprovalsPage'
 import SettingsPage from './pages/SettingsPage'
 import './styles.css'
 
@@ -59,6 +61,22 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <SummaryPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/requests"
+        element={
+          <RequireAuth>
+            <RequestsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/approvals"
+        element={
+          <RequireAuth>
+            <ApprovalsPage />
           </RequireAuth>
         }
       />

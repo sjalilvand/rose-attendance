@@ -282,3 +282,161 @@ export function fetchDaily(from: string, to: string): Promise<{ count: number; r
 export function fetchSummaries(): Promise<{ count: number; results: SummaryRow[] }> {
   return apiFetch('/reports/monthly-summaries/?page_size=24')
 }
+
+// ---------------------------------------------------------------------------
+// Requests & approvals (phase-2 step 3 — section 11 + approved decision #5)
+// ---------------------------------------------------------------------------
+export interface RequestSegmentInfo {
+  id: number
+  branch: string
+  branch_name: string
+  starts_at: string
+  ends_at: string
+  computed_minutes: number
+  status: string
+}
+
+export interface MyRequest {
+  kind: 'LEAVE' | 'MISSION'
+  id: number
+  status: string
+  starts_at: string
+  ends_at: string
+  computed_minutes: number
+  created_at: string
+  segments: RequestSegmentInfo[]
+  leave_type?: string
+  leave_type_name?: string
+  description?: string
+  subject?: string
+  destination?: string
+}
+
+export interface LeaveTypeInfo {
+  code: string
+  name: string
+  is_hourly: boolean
+  is_paid: boolean
+  requires_attachment: boolean
+}
+
+export interface QueueItem {
+  kind: 'LEAVE' | 'MISSION'
+  request_id: number
+  segment_id: number
+  employee: { id: number; personnel_code: string; full_name: string }
+  branch: string
+  branch_name: string
+  starts_at: string
+  ends_at: string
+  computed_minutes: number
+  leave_type?: string
+  leave_type_name?: string
+  description?: string
+  subject?: string
+  destination?: string
+}
+
+export interface ReviewItem {
+  event_uuid: string
+  employee: { id: number; personnel_code: string; full_name: string }
+  branch: string
+  event_type: string
+  device_time: string | null
+  effective_time: string
+  flags: string[]
+  location_status: string
+  connection_mode: string
+}
+
+export interface OvertimeItem {
+  id: number
+  employee: { id: number; personnel_code: string; full_name: string }
+  branch: string
+  shift_date: string
+  proposed_minutes: number
+  approved_minutes: number
+  status: string
+  reason: string
+  decided_at: string | null
+}
+
+export interface BoardRow {
+  employee: { id: number; personnel_code: string; full_name: string; is_home: boolean }
+  branch: string
+  branch_name: string
+  day: DayRow | null
+}
+
+export function fetchLeaveTypes(): Promise<{ count: number; results: LeaveTypeInfo[] }> {
+  return apiFetch('/leave-types/')
+}
+
+export function fetchMyRequests(): Promise<{ count: number; results: MyRequest[] }> {
+  return apiFetch('/requests/')
+}
+
+export function submitLeave(payload: {
+  leave_type: string
+  starts_at: string
+  ends_at: string
+  description?: string
+}): Promise<MyRequest> {
+  return apiFetch('/requests/leave/', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function submitMission(payload: {
+  subject: string
+  starts_at: string
+  ends_at: string
+  destination_text?: string
+}): Promise<MyRequest> {
+  return apiFetch('/requests/mission/', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function cancelRequest(kind: 'LEAVE' | 'MISSION', id: number): Promise<MyRequest> {
+  return apiFetch('/requests/cancel/', { method: 'POST', body: JSON.stringify({ kind, id }) })
+}
+
+export function fetchRequestQueue(): Promise<{ count: number; results: QueueItem[] }> {
+  return apiFetch('/requests/queue/')
+}
+
+export function decideSegment(
+  segment_id: number,
+  action: 'APPROVE' | 'REJECT',
+  comment = '',
+): Promise<{ segment_id: number; segment_status: string; overall_status: string }> {
+  return apiFetch('/requests/queue/decide/', {
+    method: 'POST',
+    body: JSON.stringify({ segment_id, action, comment }),
+  })
+}
+
+export function fetchReviewQueue(): Promise<{ count: number; results: ReviewItem[] }> {
+  return apiFetch('/attendance/review-queue/?page_size=100')
+}
+
+export function approveReviewPunch(
+  event_uuid: string,
+  corrected_time: string,
+  reason: string,
+): Promise<PunchResult> {
+  return apiFetch('/attendance/review-queue/approve/', {
+    method: 'POST',
+    body: JSON.stringify({ event_uuid, corrected_time, reason }),
+  })
+}
+
+export function fetchOvertime(status?: string): Promise<{ count: number; results: OvertimeItem[] }> {
+  const qs = status ? `&status=${encodeURIComponent(status)}` : ''
+  return apiFetch(`/attendance/overtime/?page_size=100${qs}`)
+}
+
+export function approveOvertime(id: number): Promise<{ id: number; status: string; approved_minutes: number }> {
+  return apiFetch('/attendance/overtime/approve/', { method: 'POST', body: JSON.stringify({ id }) })
+}
+
+export function fetchManagerBoard(date: string): Promise<{ date: string; count: number; results: BoardRow[] }> {
+  return apiFetch(`/reports/manager-board/?date=${encodeURIComponent(date)}`)
+}

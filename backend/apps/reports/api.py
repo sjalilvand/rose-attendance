@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from rest_framework import mixins, viewsets
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from .models import MonthlySummary
 
@@ -47,3 +48,107 @@ class MonthlySummaryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
             for s in page
         ]
         return self.get_paginated_response(data)
+
+
+class ManagerBoardViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """Branch daily board for managers — GET /reports/manager-board/?date=YYYY-MM-DD[&branch=CODE]
+
+    One row per (employee × managed branch) for the requested Jalali day,
+    derived on the fly from compute_days_for_month (no extra persistence,
+    same derived-data contract as the employee daily board).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request, *args, **kwargs):
+        import datetime as dt
+
+        from django.db.models import Q
+        from django.utils import timezone
+
+        from apps.attendance.api import _serialize_day
+        from apps.core.jalali import jalali_period_of
+        from apps.core.rbac import is_manager, scoped_branch_ids
+        from apps.people.models import Employee
+        from apps.orgs.models import Branch
+        from .services import compute_days_for_month
+
+        user = request.user
+        if not is_manager(user):
+            return Response(
+                {"detail": "دسترسی تابلوی مدیران ندارید.", "code": "FORBIDDEN"}, status=403
+            )
+        raw_date = request.query_params.get("date")
+        try:
+            board_date = dt.date.fromisoformat(raw_date) if raw_date else timezone.localdate()
+        except ValueError:
+            return Response({"detail": "تاریخ نامعتبر است.", "code": "INVALID"}, status=400)
+
+        branch_ids = scoped_branch_ids(user)
+        if branch_ids is not None:
+            branch_qs = Branch.objects.filter(id__in=branch_ids, is_active=True)
+        else:
+            branch_qs = Branch.objects.filter(is_active=True)
+        branch_code = request.query_params.get("branch")
+        if branch_code:
+            branch_qs = branch_qs.filter(code=branch_code)
+        branches = list(branch_qs.order_by("code"))
+        if not branches:
+            return Response({"date": board_date, "count": 0, "results": []})
+
+        branch_by_id = {b.id: b for b in branches}
+        today = timezone.localdate()
+        employees = (
+            Employee.objects.filter(employment_status="ACTIVE")
+            .filter(
+                Q(home_branch_id__in=branch_by_id)
+                | Q(
+                    branch_assignments__branch_id__in=branch_by_id,
+                    branch_assignments__is_allowed=True,
+                    branch_assignments__valid_from__lte=board_date,
+                )
+                & (
+                    Q(branch_assignments__valid_to__isnull=True)
+                    | Q(branch_assignments__valid_to__gte=board_date)
+                )
+            )
+            .select_related("home_branch")
+            .distinct()
+        )
+
+        jy, jm = jalali_period_of(board_date)
+        rows = []
+        for employee in employees:
+            covered = set()
+            for branch in branches:
+                is_home = employee.home_branch_id == branch.id
+                if not is_home:
+                    has_assignment = employee.branch_assignments.filter(
+                        branch_id=branch.id,
+                        is_allowed=True,
+                        valid_from__lte=board_date,
+                    ).filter(
+                        Q(valid_to__isnull=True) | Q(valid_to__gte=board_date)
+                    ).exists()
+                    if not has_assignment:
+                        continue
+                if branch.id in covered:
+                    continue
+                covered.add(branch.id)
+                results, _resolver = compute_days_for_month(employee.id, branch.id, jy, jm)
+                day = next((d for d in results if d.shift_date == board_date), None)
+                rows.append(
+                    {
+                        "employee": {
+                            "id": employee.id,
+                            "personnel_code": employee.personnel_code,
+                            "full_name": employee.full_name,
+                            "is_home": is_home,
+                        },
+                        "branch": branch.code,
+                        "branch_name": branch.name,
+                        "day": _serialize_day(day) if day else None,
+                    }
+                )
+        rows.sort(key=lambda r: (r["branch"], r["employee"]["personnel_code"]))
+        return Response({"date": board_date, "count": len(rows), "results": rows[:400]})
