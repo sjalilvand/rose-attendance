@@ -105,11 +105,13 @@ data class PunchRequest(
     val event_uuid: String,
     val event_type: String, // CHECK_IN / CHECK_OUT
     val branch_code: String,
-    val channel: String = "PWA",
+    val channel: String = "ANDROID",
     val device_time: String,
     val latitude: Double? = null,
     val longitude: Double? = null,
     val location_accuracy_m: Double? = null,
+    val location_fixed_at: String? = null,
+    val clock_offset_minutes: Double? = null,
 )
 
 @Serializable

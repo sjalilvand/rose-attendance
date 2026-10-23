@@ -2,7 +2,12 @@ package ir.rose.attendance.data
 
 import android.content.Context
 import ir.rose.attendance.BuildConfig
+import java.time.Duration
+import java.time.OffsetDateTime
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -12,7 +17,6 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
-import java.util.concurrent.TimeUnit
 
 /** Endpoints مصرفی اسکلت — همان قرارداد /api/v1 سرور. */
 interface RoseApi {
@@ -45,6 +49,14 @@ data class RefreshBody(val refresh: String)
 class Repository(context: Context) {
 
     val store = TokenStore(context)
+
+    /**
+     * افست ساعت دستگاه نسبت به سرور (دقیقه) — از server_time پاسخ /me/.
+     * همراه punch ارسال می‌شود تا قاعدهٔ CLOCK_SKEW سرور دقیق تصمیم بگیرد (گام ۲).
+     */
+    @Volatile
+    var clockOffsetMinutes: Double? = null
+        private set
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -81,6 +93,41 @@ class Repository(context: Context) {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(RoseApi::class.java)
+    }
+
+    /** کلاینت بدون interceptor توکن — سوکت، توکن را در query string می‌برد. */
+    internal val wsClient: OkHttpClient by lazy {
+        baseClient.newBuilder().pingInterval(25, TimeUnit.SECONDS).build()
+    }
+
+    /** تبدیل API_BASE به ws(s)://…/ws/notifications/?token=… */
+    fun webSocketUrl(accessToken: String): String {
+        val base = BuildConfig.API_BASE.toHttpUrl()
+        val scheme = if (base.isHttps) "wss" else "ws"
+        return base.newBuilder()
+            .scheme(scheme)
+            .addEncodedPathSegments("ws/notifications/")
+            .addQueryParameter("token", accessToken)
+            .build()
+            .toString()
+    }
+
+    private fun measureClockOffset(serverTime: String?) {
+        if (serverTime.isNullOrBlank()) return
+        runCatching {
+            val server = OffsetDateTime.parse(serverTime)
+            clockOffsetMinutes = Duration.between(server, OffsetDateTime.now()).toMillis() / 60000.0
+        }
+    }
+
+    /** نسخهٔ مسدود برای ترد سوکت — یک تلاش تازه‌سازی توکن. */
+    fun refreshSync(): Boolean = runBlocking { refreshSession() }
+
+    /** /me/ با اندازه‌گیری افست ساعت دستگاه نسبت به سرور. */
+    suspend fun meInfo(): MeInfo {
+        val info = call { api.me() }
+        measureClockOffset(info.server_time)
+        return info
     }
 
     suspend fun login(username: String, password: String): TokenResponse {

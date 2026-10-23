@@ -1,5 +1,9 @@
 package ir.rose.attendance.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,7 +20,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,32 +30,75 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import ir.rose.attendance.data.BalancesResp
+import ir.rose.attendance.data.LiveSocket
+import ir.rose.attendance.data.LocationFix
+import ir.rose.attendance.data.LocationSource
 import ir.rose.attendance.data.MeInfo
 import ir.rose.attendance.data.PunchRequest
 import ir.rose.attendance.data.Repository
 import ir.rose.attendance.data.TodayCard
-import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
 import java.util.UUID
+import kotlinx.coroutines.launch
 
 /**
- * خانهٔ اسکلت: کارت امروز + ثبت ورود/خروج + ماندهٔ مرخصی.
- * مطابق مصوبهٔ §34 ثبت تردد بدون GPS ممکن است — رویداد بدون موقعیت به صف
- * رسیدگی (NEEDS_REVIEW) می‌رود و این رفتار عمدی سرور است.
+ * خانهٔ گام ۲: کارت امروز + ثبت ورود/خروج با موقعیت مکانی + ماندهٔ مرخصی
+ * + اعلان‌های زندهٔ WebSocket.
+ *
+ * قرارداد مصوب §34: ثبت تردد بدون GPS ممکن است — اگر مجوز رد شود یا موقعیت
+ * در مهلت کوتاه نیاید، رویداد بدون مختصات می‌رود و سرور برچسب UNAVAILABLE
+ * می‌زند (رسیدگی، نه رد). چینش RTL در MainActivity قفل شده است.
  */
+
+private val REVIEW_KINDS = setOf("REVIEW_RESOLVED", "REVIEW_REJECTED", "OVERTIME_DECISION")
+
+private fun locationLabel(status: String, reason: String): String = when (status) {
+    "IN_RANGE" -> "موقعیت: در محدوده ✓"
+    "OUT_OF_RANGE" -> "موقعیت: خارج از محدوده ($reason)"
+    "LOW_ACCURACY" -> "موقعیت: دقت پایین ($reason)"
+    "UNAVAILABLE" -> if (reason == "NO_COORDINATES") "موقعیت: ارسال نشد — در صف رسیدگی" else "موقعیت: نامشخص ($reason)"
+    else -> "موقعیت: $status"
+}
+
 @Composable
 fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val location = remember { LocationSource(context) }
+    val live = remember { LiveSocket(repo) }
     var me by remember { mutableStateOf<MeInfo?>(null) }
     var today by remember { mutableStateOf<TodayCard?>(null) }
     var balances by remember { mutableStateOf<BalancesResp?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var pendingPunch by remember { mutableStateOf<String?>(null) }
+    val notifications by live.notifications.collectAsState()
+
+    val hasLocationPermission = remember {
+        mutableStateOf(checkLocationPermission(context))
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        hasLocationPermission.value = grants.values.any { it }
+        pendingPunch?.let { type ->
+            pendingPunch = null
+            doPunch(repo, scope, location, hasLocationPermission.value, type) { msg, reloadToday ->
+                message = msg
+                if (reloadToday) {
+                    today = try { repo.call { repo.api.today() } } catch (_: Exception) { null }
+                }
+                busy = false
+            }
+        }
+    }
 
     suspend fun reload() {
-        me = repo.call { repo.api.me() }
+        me = repo.meInfo()
         today = try {
             repo.call { repo.api.today() }
         } catch (_: Exception) {
@@ -70,35 +119,43 @@ fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
         }
     }
 
+    // سوکت زنده فقط در حین فعال بودن صفحهٔ خانه باز می‌ماند.
+    DisposableEffect(Unit) {
+        live.start()
+        onDispose { live.stop() }
+    }
+
+    // تصمیم‌های رسیدگی/اضافه‌کاری → کارت امروز تازه شود.
+    LaunchedEffect(Unit) {
+        live.notifications.collect { list ->
+            val latest = list.firstOrNull() ?: return@collect
+            if (latest.kind in REVIEW_KINDS) {
+                today = try { repo.call { repo.api.today() } } catch (_: Exception) { null }
+            }
+        }
+    }
+
     fun punch(eventType: String) {
+        if (busy) return
         val branchCode = me?.branches?.firstOrNull { it.is_home }?.code
             ?: me?.branches?.firstOrNull()?.code
-        if (branchCode == null || busy) {
+        if (branchCode == null) {
             message = "شعبه‌ای برای ثبت تردد تعریف نشده است."
             return
         }
         busy = true
         message = null
-        scope.launch {
-            try {
-                val result = repo.call {
-                    repo.api.punch(
-                        PunchRequest(
-                            event_uuid = UUID.randomUUID().toString(),
-                            event_type = eventType,
-                            branch_code = branchCode,
-                            device_time = OffsetDateTime.now().toString(),
-                        )
-                    )
-                }
-                message = if (result.created) "ثبت شد (${result.event_type})"
-                else "رویداد تکراری بود"
+        if (!hasLocationPermission.value) {
+            pendingPunch = eventType
+            permissionLauncher.launch(locationPermissions())
+            return // ادامه پس از پاسخ مجوز (busy تا آن‌جا روشن می‌ماند)
+        }
+        doPunch(repo, scope, location, true, eventType) { msg, reloadToday ->
+            message = msg
+            if (reloadToday) {
                 today = try { repo.call { repo.api.today() } } catch (_: Exception) { null }
-            } catch (e: Exception) {
-                message = "ثبت ناموفق بود — دوباره تلاش کنید."
-            } finally {
-                busy = false
             }
+            busy = false
         }
     }
 
@@ -156,6 +213,20 @@ fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("اعلان‌های زنده", style = MaterialTheme.typography.titleMedium)
+                val items = notifications.take(5)
+                if (items.isEmpty()) {
+                    Text("اعلانی نیست؛ تصمیم‌های رسیدگی و اضافه‌کاری همین‌جا می‌آید.")
+                } else {
+                    items.forEach { n ->
+                        Text("• ${n.title}")
+                    }
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("ماندهٔ مرخصی", style = MaterialTheme.typography.titleMedium)
                 val rows = balances?.balances.orEmpty().filter { it.tracked }
                 if (rows.isEmpty()) {
@@ -169,6 +240,61 @@ fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+private fun checkLocationPermission(context: android.content.Context): Boolean =
+    locationPermissions().any {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+private fun locationPermissions(): Array<String> = arrayOf(
+    Manifest.permission.ACCESS_FINE_LOCATION,
+    Manifest.permission.ACCESS_COARSE_LOCATION,
+)
+
+/** جریان ثبت تردد: (در صورت مجوز) گرفتن موقعیت با مهلت کوتاه، سپس punch. */
+private fun doPunch(
+    repo: Repository,
+    scope: kotlinx.coroutines.CoroutineScope,
+    location: LocationSource,
+    withLocation: Boolean,
+    eventType: String,
+    onDone: (message: String, reloadToday: Boolean) -> Unit,
+) {
+    scope.launch {
+        try {
+            var fix: LocationFix? = null
+            if (withLocation) {
+                fix = location.currentFix()
+            }
+            val info = repo.meInfo()
+            val branchCode = info.branches.firstOrNull { it.is_home }?.code
+                ?: info.branches.firstOrNull()?.code
+            if (branchCode == null) {
+                onDone("شعبه‌ای برای ثبت تردد تعریف نشده است.", false)
+                return@launch
+            }
+            val result = repo.call {
+                repo.api.punch(
+                    PunchRequest(
+                        event_uuid = UUID.randomUUID().toString(),
+                        event_type = eventType,
+                        branch_code = branchCode,
+                        device_time = OffsetDateTime.now().toString(),
+                        latitude = fix?.latitude,
+                        longitude = fix?.longitude,
+                        location_accuracy_m = fix?.accuracyM,
+                        location_fixed_at = fix?.fixedAt,
+                        clock_offset_minutes = repo.clockOffsetMinutes,
+                    ),
+                )
+            }
+            val verb = if (result.created) "ثبت شد (${result.event_type})" else "رویداد تکراری بود"
+            onDone("$verb — ${locationLabel(result.location_status, result.location_reason)}", true)
+        } catch (e: Exception) {
+            onDone("ثبت ناموفق بود — دوباره تلاش کنید.", false)
         }
     }
 }
