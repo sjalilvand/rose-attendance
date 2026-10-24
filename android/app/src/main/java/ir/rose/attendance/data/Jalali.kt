@@ -115,6 +115,9 @@ object Jalali {
     fun previousMonth(jy: Int, jm: Int): Pair<Int, Int> =
         if (jm > 1) jy to (jm - 1) else (jy - 1) to 12
 
+    fun nextMonth(jy: Int, jm: Int): Pair<Int, Int> =
+        if (jm < 12) jy to (jm + 1) else (jy + 1) to 1
+
     // ------------------------------------------------------------- نام‌ها
 
     private val MONTH_NAMES = listOf(

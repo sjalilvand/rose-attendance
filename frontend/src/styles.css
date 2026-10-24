@@ -646,3 +646,9 @@ details > summary { cursor: pointer; }
 .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
 .legend-dot.legend-work { background: var(--primary, #b3475f); }
 .legend-dot.legend-absence { background: #d9a09a; }
+
+/* ---------------------------------------------------------------------------
+   Shamsi (Jalali) date selector — step 4: Jalali-izing the existing calendars
+--------------------------------------------------------------------------- */
+.jalali-date { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.jalali-datetime { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

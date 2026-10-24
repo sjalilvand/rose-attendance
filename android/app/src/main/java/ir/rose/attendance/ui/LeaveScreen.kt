@@ -54,15 +54,6 @@ import kotlinx.coroutines.launch
  * (۲۹/۳۰/۳۱) کنترل و کنار فرم به شکل بلند نمایش داده می‌شود.
  */
 
-private fun parseHm(raw: String): LocalTime? {
-    val s = Jalali.latinDigits(raw.trim())
-    val m = Regex("^(\\d{1,2}):(\\d{2})$").find(s) ?: return null
-    val hh = m.groupValues[1].toInt()
-    val mm = m.groupValues[2].toInt()
-    if (hh !in 0..23 || mm !in 0..59) return null
-    return LocalTime.of(hh, mm)
-}
-
 private fun parseJalaliDate(y: String, m: String, d: String): LocalDate? {
     val iy = Jalali.latinDigits(y.trim()).toIntOrNull() ?: return null
     val im = Jalali.latinDigits(m.trim()).toIntOrNull() ?: return null
@@ -89,6 +80,9 @@ fun LeaveScreen(repo: Repository, onBack: () -> Unit) {
     var endD by remember { mutableStateOf(todayJ.jd.toString()) }
     var endTime by remember { mutableStateOf("17:00") }
     var description by remember { mutableStateOf("") }
+    // تقویم شمسی (گام ۴) — انتخاب بصری تاریخ در کنار ورودی عددی
+    var showStartCal by remember { mutableStateOf(false) }
+    var showEndCal by remember { mutableStateOf(false) }
 
     var loading by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
@@ -117,8 +111,8 @@ fun LeaveScreen(repo: Repository, onBack: () -> Unit) {
         if (busy || selectedCode == null) return
         val startDate = parseJalaliDate(startY, startM, startD)
         val endDate = parseJalaliDate(endY, endM, endD)
-        val st = parseHm(startTime)
-        val et = parseHm(endTime)
+        val st = parseHmText(startTime)
+        val et = parseHmText(endTime)
         if (startDate == null) { error = "تاریخ شروع نامعتبر است (روز را با طول ماه چک کنید)."; return }
         if (endDate == null) { error = "تاریخ پایان نامعتبر است."; return }
         if (st == null) { error = "ساعت شروع را به شکل ۰۹:۰۰ وارد کنید."; return }
@@ -279,6 +273,22 @@ fun LeaveScreen(repo: Repository, onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    TextButton(
+                        onClick = { showStartCal = !showStartCal; showEndCal = false },
+                        enabled = !busy,
+                    ) { Text(if (showStartCal) "بستن تقویم" else "انتخاب از تقویم شمسی") }
+                    if (showStartCal) {
+                        JalaliCalendar(
+                            selected = parseJalaliDate(startY, startM, startD),
+                            onPick = { picked ->
+                                val j = Jalali.toJalali(picked)
+                                startY = j.jy.toString()
+                                startM = j.jm.toString()
+                                startD = j.jd.toString()
+                                showStartCal = false
+                            },
+                        )
+                    }
 
                     // پایان
                     Text("تا", style = MaterialTheme.typography.labelMedium)
@@ -312,6 +322,22 @@ fun LeaveScreen(repo: Repository, onBack: () -> Unit) {
                             Jalali.formatJalaliLong(it),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(
+                        onClick = { showEndCal = !showEndCal; showStartCal = false },
+                        enabled = !busy,
+                    ) { Text(if (showEndCal) "بستن تقویم" else "انتخاب از تقویم شمسی") }
+                    if (showEndCal) {
+                        JalaliCalendar(
+                            selected = parseJalaliDate(endY, endM, endD),
+                            onPick = { picked ->
+                                val j = Jalali.toJalali(picked)
+                                endY = j.jy.toString()
+                                endM = j.jm.toString()
+                                endD = j.jd.toString()
+                                showEndCal = false
+                            },
                         )
                     }
 

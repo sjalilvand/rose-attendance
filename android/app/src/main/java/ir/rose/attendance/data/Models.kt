@@ -221,3 +221,121 @@ data class CancelReq(
     val kind: String,
     val id: Long,
 )
+
+// ------------------------------------------------------ گام ۴ — رسیدگی مدیران
+
+/** پرسنل خلاصه‌شده در صف‌های رسیدگی (مشترک بین سه زبانه). */
+@Serializable
+data class QueueEmployee(
+    val id: Long = 0,
+    val personnel_code: String = "",
+    val full_name: String = "",
+)
+
+/**
+ * سطر صف /requests/queue/ — یک پارهٔ PENDING از درخواست مرخصی یا مأموریت
+ * در محدودهٔ مدیر (شعبه‌های خودش یا کل سازمان برای HR/منطقه/ادمین).
+ */
+@Serializable
+data class QueueItemRow(
+    val kind: String = "LEAVE",
+    val request_id: Long = 0,
+    val segment_id: Long = 0,
+    val leave_type: String? = null,
+    val leave_type_name: String? = null,
+    val description: String? = null,
+    /** ماندهٔ ردیابی‌شدهٔ پرسنل برای همین نوع مرخصی؛ null = ردیابی‌نشده. */
+    val employee_balance_minutes: Int? = null,
+    val subject: String? = null,
+    val destination: String? = null,
+    val employee: QueueEmployee = QueueEmployee(),
+    val branch: String = "",
+    val branch_name: String = "",
+    val starts_at: String? = null,
+    val ends_at: String? = null,
+    val computed_minutes: Int = 0,
+)
+
+@Serializable
+data class QueueResp(
+    val count: Int = 0,
+    val results: List<QueueItemRow> = emptyList(),
+)
+
+@Serializable
+data class DecideReq(
+    val segment_id: Long,
+    val action: String, // APPROVE / REJECT
+    val comment: String = "",
+)
+
+@Serializable
+data class DecideResp(
+    val segment_id: Long = 0,
+    val segment_status: String = "",
+    val overall_status: String = "",
+)
+
+/** سطر صف /attendance/review-queue/ — رویداد NEEDS_REVIEW برای رسیدگی مدیر. */
+@Serializable
+data class ReviewItemRow(
+    val event_uuid: String = "",
+    val employee: QueueEmployee = QueueEmployee(),
+    val branch: String = "",
+    val event_type: String = "",
+    val device_time: String? = null,
+    val effective_time: String? = null,
+    val flags: List<String> = emptyList(),
+    val location_status: String? = null,
+    val connection_mode: String? = null,
+)
+
+/** پاسخ صفحه‌بندی‌شدهٔ DRF ({count, next, previous, results}). */
+@Serializable
+data class ReviewListResp(
+    val count: Int = 0,
+    val results: List<ReviewItemRow> = emptyList(),
+)
+
+@Serializable
+data class ReviewApproveReq(
+    val event_uuid: String,
+    val corrected_time: String,
+    val reason: String = "",
+)
+
+@Serializable
+data class ReviewRejectReq(
+    val event_uuid: String,
+    val reason: String,
+)
+
+/** سطر صف /attendance/overtime/?status=PENDING. */
+@Serializable
+data class OvertimeItemRow(
+    val id: Long = 0,
+    val employee: QueueEmployee = QueueEmployee(),
+    val branch: String = "",
+    val shift_date: String? = null,
+    val proposed_minutes: Int = 0,
+    val approved_minutes: Int = 0,
+    val status: String = "",
+    val reason: String? = null,
+)
+
+@Serializable
+data class OvertimeListResp(
+    val count: Int = 0,
+    val results: List<OvertimeItemRow> = emptyList(),
+)
+
+/** تأیید اضافه‌کاری با کل مبلغ پیشنهادی (approved_minutes اختیاری سرور). */
+@Serializable
+data class OvertimeApproveReq(val id: Long)
+
+@Serializable
+data class OvertimeApproveResp(
+    val id: Long = 0,
+    val status: String = "",
+    val approved_minutes: Int = 0,
+)

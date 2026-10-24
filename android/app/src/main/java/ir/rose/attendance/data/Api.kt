@@ -63,6 +63,39 @@ interface RoseApi {
     /** لغو درخواست PENDING خودم — kind = LEAVE / MISSION. */
     @POST("api/v1/requests/cancel/")
     suspend fun cancelRequest(@Body body: CancelReq): MyRequestRow
+
+    // ------------------------------------------- گام ۴ — رسیدگی مدیران
+
+    /** پاره‌های PENDING در محدودهٔ مدیر (مرخصی + مأموریت، تا ۲۰۰ مورد). */
+    @GET("api/v1/requests/queue/")
+    suspend fun requestQueue(): QueueResp
+
+    /** تصمیم روی یک پاره — action = APPROVE / REJECT. */
+    @POST("api/v1/requests/queue/decide/")
+    suspend fun decideSegment(@Body body: DecideReq): DecideResp
+
+    /** رویدادهای NEEDS_REVIEW در محدودهٔ مدیر (صفحه‌بندی DRF، page_size=100). */
+    @GET("api/v1/attendance/review-queue/")
+    suspend fun reviewQueue(@Query("page_size") pageSize: Int = 100): ReviewListResp
+
+    /** ثبت رسیدگی با زمان مؤثر اصلاح‌شده (لایهٔ TIME_FIX). */
+    @POST("api/v1/attendance/review-queue/approve/")
+    suspend fun approveReviewPunch(@Body body: ReviewApproveReq): PunchResult
+
+    /** رد رویداد با دلیل الزامی (لایهٔ VOID — برچسب REJECTED_TECHNICAL). */
+    @POST("api/v1/attendance/review-queue/reject/")
+    suspend fun rejectReviewPunch(@Body body: ReviewRejectReq): PunchResult
+
+    /** پیشنهادهای اضافه‌کاری در محدودهٔ مدیر (status = PENDING). */
+    @GET("api/v1/attendance/overtime/")
+    suspend fun overtime(
+        @Query("status") status: String,
+        @Query("page_size") pageSize: Int = 100,
+    ): OvertimeListResp
+
+    /** تأیید اضافه‌کاری با کل مبلغ پیشنهادی. */
+    @POST("api/v1/attendance/overtime/approve/")
+    suspend fun approveOvertime(@Body body: OvertimeApproveReq): OvertimeApproveResp
 }
 
 @kotlinx.serialization.Serializable

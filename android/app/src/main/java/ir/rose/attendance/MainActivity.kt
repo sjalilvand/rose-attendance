@@ -21,6 +21,7 @@ import ir.rose.attendance.ui.HistoryScreen
 import ir.rose.attendance.ui.HomeScreen
 import ir.rose.attendance.ui.LeaveScreen
 import ir.rose.attendance.ui.LoginScreen
+import ir.rose.attendance.ui.ManagerScreen
 import ir.rose.attendance.ui.theme.RoseTheme
 
 /**
@@ -49,18 +50,20 @@ private fun AppRoot() {
     val repo = remember { Repository(context) }
     // وضعیت ورود از توکن ذخیره‌شده؛ rememberSaveable برای چرخش صفحه
     var loggedIn by rememberSaveable { mutableStateOf(repo.store.hasSession) }
-    // روتر سادهٔ سه‌صفحه‌ای — بدون کتابخانهٔ navigation (اسکلت سبک)
+    // روتر سادهٔ چهارصفحه‌ای — بدون کتابخانهٔ navigation (اسکلت سبک)
     var screen by rememberSaveable { mutableStateOf("home") }
 
     if (loggedIn) {
         when (screen) {
             "history" -> HistoryScreen(repo = repo, onBack = { screen = "home" })
             "leave" -> LeaveScreen(repo = repo, onBack = { screen = "home" })
+            "review" -> ManagerScreen(repo = repo, onBack = { screen = "home" })
             else -> HomeScreen(
                 repo = repo,
                 onLoggedOut = { loggedIn = false },
                 onOpenHistory = { screen = "history" },
                 onOpenLeave = { screen = "leave" },
+                onOpenReview = { screen = "review" },
             )
         }
     } else {

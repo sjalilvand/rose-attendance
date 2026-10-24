@@ -16,6 +16,7 @@ import {
 import { formatJalaliDate, formatJalaliDateTime, formatTime, minutesToHM } from '../lib/jalali'
 import { subscribeNotifications } from '../lib/ws'
 import { useAuth } from '../context/AuthContext'
+import JalaliDateInput from '../components/JalaliDateInput'
 
 const MANAGER_ROLES = ['BRANCH_MANAGER', 'REGION_MANAGER', 'HR', 'ADMIN']
 
@@ -34,6 +35,12 @@ function toLocalInputValue(iso: string | null | undefined): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+/** بخش تاریخ 'YYYY-MM-DD' از مقدار datetime محلی. */
+const datePart = (s: string | undefined): string => (s ?? '').slice(0, 10)
+
+/** بخش ساعت 'HH:mm' از مقدار datetime محلی. */
+const timePart = (s: string | undefined): string => (s ?? '').slice(11, 16)
 
 export default function ApprovalsPage() {
   const { me } = useAuth()
@@ -264,11 +271,29 @@ function ReviewQueue() {
           <div className="grid2">
             <label className="field-row">
               <span>زمان مؤثر (اصلاح‌شده)</span>
-              <input
-                type="datetime-local"
-                value={times[item.event_uuid] ?? ''}
-                onChange={(e) => setTimes((prev) => ({ ...prev, [item.event_uuid]: e.target.value }))}
-              />
+              <span className="jalali-datetime">
+                <JalaliDateInput
+                  value={datePart(times[item.event_uuid])}
+                  onChange={(iso) =>
+                    setTimes((prev) => ({
+                      ...prev,
+                      [item.event_uuid]: `${iso}T${timePart(prev[item.event_uuid]) || '00:00'}`,
+                    }))
+                  }
+                  ariaLabel="تاریخ مؤثر شمسی"
+                />
+                <input
+                  type="time"
+                  value={timePart(times[item.event_uuid])}
+                  onChange={(e) =>
+                    setTimes((prev) => ({
+                      ...prev,
+                      [item.event_uuid]: `${datePart(prev[item.event_uuid]) || datePart(toLocalInputValue(new Date().toISOString()))}T${e.target.value || '00:00'}`,
+                    }))
+                  }
+                  aria-label="ساعت مؤثر"
+                />
+              </span>
             </label>
             <label className="field-row">
               <span>دلیل تصمیم (برای رد الزامی)</span>
@@ -386,8 +411,8 @@ function BranchBoard() {
     <>
       <div className="card">
         <label className="field-row">
-          <span>تاریخ</span>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <span>تاریخ (شمسی)</span>
+          <JalaliDateInput value={date} onChange={setDate} ariaLabel="تاریخ تابلو" />
         </label>
         {loading && <p className="muted">در حال محاسبه…</p>}
         {error && <div className="banner danger">{error}</div>}

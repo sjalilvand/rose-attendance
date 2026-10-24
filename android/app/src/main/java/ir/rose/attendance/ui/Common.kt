@@ -1,6 +1,7 @@
 package ir.rose.attendance.ui
 
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -83,4 +84,35 @@ fun jalaliDayLong(isoDate: String?): String {
     return runCatching {
         Jalali.formatJalaliLong(LocalDate.parse(isoDate))
     }.getOrDefault(isoDate)
+}
+
+/** نقش‌های تصمیم‌گیر رسیدگی — همان قرارداد MANAGER_ROLES سرور (core/rbac). */
+val MANAGER_ROLES = setOf("BRANCH_MANAGER", "REGION_MANAGER", "HR", "ADMIN")
+
+fun hasManagerRole(roles: List<String>?): Boolean =
+    roles?.any { it in MANAGER_ROLES } == true
+
+/**
+ * «۱۴۰۵/۰۸/۰۲» (با ارقام فارسی یا لاتین) → LocalDate؛ نامعتبر → null.
+ * برای فیلدهای متنی تاریخ جلالی (فرم مرخصی، رسیدگی تردد).
+ */
+fun parseJalaliText(raw: String?): LocalDate? {
+    if (raw.isNullOrBlank()) return null
+    val parts = Jalali.latinDigits(raw.trim()).split('/')
+    if (parts.size != 3) return null
+    val y = parts[0].trim().toIntOrNull() ?: return null
+    val m = parts[1].trim().toIntOrNull() ?: return null
+    val d = parts[2].trim().toIntOrNull() ?: return null
+    return Jalali.parse(y, m, d)
+}
+
+/** «۰۹:۰۰» → LocalTime؛ نامعتبر → null (ارقام فارسی پذیرفته می‌شود). */
+fun parseHmText(raw: String?): LocalTime? {
+    if (raw.isNullOrBlank()) return null
+    val s = Jalali.latinDigits(raw.trim())
+    val m = Regex("^(\\d{1,2}):(\\d{2})$").find(s) ?: return null
+    val hh = m.groupValues[1].toInt()
+    val mm = m.groupValues[2].toInt()
+    if (hh !in 0..23 || mm !in 0..59) return null
+    return LocalTime.of(hh, mm)
 }

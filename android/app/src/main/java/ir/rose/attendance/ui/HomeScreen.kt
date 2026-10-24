@@ -70,6 +70,7 @@ fun HomeScreen(
     onLoggedOut: () -> Unit,
     onOpenHistory: () -> Unit = {},
     onOpenLeave: () -> Unit = {},
+    onOpenReview: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -226,6 +227,13 @@ fun HomeScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = onOpenHistory) { Text("تاریخچهٔ کارکرد") }
             OutlinedButton(onClick = onOpenLeave) { Text("درخواست مرخصی") }
+        }
+
+        // گام ۴ — رسیدگی مدیران؛ فقط برای نقش‌های تصمیم‌گیر نشان داده می‌شود
+        if (hasManagerRole(me?.roles)) {
+            OutlinedButton(onClick = onOpenReview) {
+                Text("رسیدگی مدیر (درخواست‌ها و ترددها)")
+            }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
