@@ -17,6 +17,7 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Query
 
 /** Endpoints مصرفی اسکلت — همان قرارداد /api/v1 سرور. */
 interface RoseApi {
@@ -37,6 +38,31 @@ interface RoseApi {
 
     @GET("api/v1/leaves/ledger/balances/")
     suspend fun balances(): BalancesResp
+
+    // ------------------------------------------- گام ۳ — تاریخچهٔ کارکرد
+
+    /** سطرهای روزانهٔ محاسبه‌شده (حداکثر ۴۵ روز، داخل پنجرهٔ سه‌ماههٔ شمسی). */
+    @GET("api/v1/attendance/daily/")
+    suspend fun daily(
+        @Query("from") from: String,
+        @Query("to") to: String,
+    ): DailyListResp
+
+    // ------------------------------------------- گام ۳ — درخواست مرخصی
+
+    @GET("api/v1/leave-types/")
+    suspend fun leaveTypes(): LeaveTypesResp
+
+    /** فهرست درخواست‌های خودم (مرخصی + مأموریت، تا ۱۰۰ مورد آخر). */
+    @GET("api/v1/requests/")
+    suspend fun myRequests(): RequestsResp
+
+    @POST("api/v1/requests/leave/")
+    suspend fun submitLeave(@Body body: LeaveSubmitReq): MyRequestRow
+
+    /** لغو درخواست PENDING خودم — kind = LEAVE / MISSION. */
+    @POST("api/v1/requests/cancel/")
+    suspend fun cancelRequest(@Body body: CancelReq): MyRequestRow
 }
 
 @kotlinx.serialization.Serializable

@@ -43,6 +43,7 @@ data class EmployeeInfo(
 
 @Serializable
 data class BranchInfo(
+    val id: Long = 0,
     val code: String,
     val name: String,
     val is_home: Boolean = false,
@@ -60,7 +61,10 @@ data class MeInfo(
 @Serializable
 data class DayRow(
     val shift_date: String? = null,
+    val branch: Long? = null, // شناسهٔ شعبه (تاریخچه: یک سطر به‌ازای هر روز×شعبه)
+    val shift_code: String? = null,
     val is_workday: Boolean = false,
+    val is_holiday: Boolean = false,
     val required_minutes: Int = 0,
     val valid_presence_minutes: Int = 0,
     val accepted_work_minutes: Int = 0,
@@ -139,4 +143,81 @@ data class LeaveBalanceRow(
 @Serializable
 data class BalancesResp(
     val balances: List<LeaveBalanceRow> = emptyList(),
+)
+
+// ------------------------------------------------ گام ۳ — تاریخچهٔ کارکرد
+
+/** پاسخ /attendance/daily/ — سطرهای محاسبه‌شدهٔ روزانه در بازهٔ درخواستی. */
+@Serializable
+data class DailyListResp(
+    val count: Int = 0,
+    val results: List<DayRow> = emptyList(),
+)
+
+// ------------------------------------------------------ گام ۳ — درخواست مرخصی
+
+/** گزینه‌های /leave-types/ برای فهرست انتخاب نوع مرخصی. */
+@Serializable
+data class LeaveTypeRow(
+    val code: String,
+    val name: String,
+    val is_hourly: Boolean = false,
+    val is_paid: Boolean = true,
+    val requires_attachment: Boolean = false,
+)
+
+@Serializable
+data class LeaveTypesResp(
+    val count: Int = 0,
+    val results: List<LeaveTypeRow> = emptyList(),
+)
+
+/** وضعیت هر پاره (شعبه) از درخواست — تقسیم خودکار بازه بین شعب. */
+@Serializable
+data class RequestSegmentRow(
+    val id: Long = 0,
+    val branch: String = "",
+    val branch_name: String = "",
+    val starts_at: String? = null,
+    val ends_at: String? = null,
+    val computed_minutes: Int = 0,
+    val status: String = "",
+)
+
+/** سطر فهرست /requests/ — مرخصی یا مأموریت (فیلد اختصاصی هرکدام nullable). */
+@Serializable
+data class MyRequestRow(
+    val kind: String = "LEAVE",
+    val id: Long = 0,
+    val leave_type: String? = null,
+    val leave_type_name: String? = null,
+    val description: String? = null,
+    val subject: String? = null,
+    val destination: String? = null,
+    val status: String = "",
+    val starts_at: String? = null,
+    val ends_at: String? = null,
+    val computed_minutes: Int = 0,
+    val created_at: String? = null,
+    val segments: List<RequestSegmentRow> = emptyList(),
+)
+
+@Serializable
+data class RequestsResp(
+    val count: Int = 0,
+    val results: List<MyRequestRow> = emptyList(),
+)
+
+@Serializable
+data class LeaveSubmitReq(
+    val leave_type: String,
+    val starts_at: String,
+    val ends_at: String,
+    val description: String = "",
+)
+
+@Serializable
+data class CancelReq(
+    val kind: String,
+    val id: Long,
 )

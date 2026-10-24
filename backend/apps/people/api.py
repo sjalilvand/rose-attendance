@@ -139,6 +139,7 @@ class MeView(APIView):
                 ),
                 "branches": [
                     {
+                        "id": branch.id,
                         "code": branch.code,
                         "name": branch.name,
                         "geo_latitude": branch.geo_latitude,

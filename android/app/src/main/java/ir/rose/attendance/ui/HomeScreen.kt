@@ -46,8 +46,8 @@ import java.util.UUID
 import kotlinx.coroutines.launch
 
 /**
- * خانهٔ گام ۲: کارت امروز + ثبت ورود/خروج با موقعیت مکانی + ماندهٔ مرخصی
- * + اعلان‌های زندهٔ WebSocket.
+ * خانهٔ گام ۳: کارت امروز + ثبت ورود/خروج با موقعیت مکانی + ماندهٔ مرخصی
+ * + اعلان‌های زندهٔ WebSocket + ورود به تاریخچهٔ کارکرد و درخواست مرخصی.
  *
  * قرارداد مصوب §34: ثبت تردد بدون GPS ممکن است — اگر مجوز رد شود یا موقعیت
  * در مهلت کوتاه نیاید، رویداد بدون مختصات می‌رود و سرور برچسب UNAVAILABLE
@@ -65,7 +65,12 @@ private fun locationLabel(status: String, reason: String): String = when (status
 }
 
 @Composable
-fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
+fun HomeScreen(
+    repo: Repository,
+    onLoggedOut: () -> Unit,
+    onOpenHistory: () -> Unit = {},
+    onOpenLeave: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val location = remember { LocationSource(context) }
@@ -78,6 +83,17 @@ fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
     var pendingPunch by remember { mutableStateOf<String?>(null) }
     val notifications by live.notifications.collectAsState()
 
+    /** تازه‌سازی کارت امروز از یک callback غیر-suspend (پس از punch/مجوز). */
+    fun refreshToday() {
+        scope.launch {
+            today = try {
+                repo.call { repo.api.today() }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
     val hasLocationPermission = remember {
         mutableStateOf(checkLocationPermission(context))
     }
@@ -89,9 +105,7 @@ fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
             pendingPunch = null
             doPunch(repo, scope, location, hasLocationPermission.value, type) { msg, reloadToday ->
                 message = msg
-                if (reloadToday) {
-                    today = try { repo.call { repo.api.today() } } catch (_: Exception) { null }
-                }
+                if (reloadToday) refreshToday()
                 busy = false
             }
         }
@@ -152,9 +166,7 @@ fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
         }
         doPunch(repo, scope, location, true, eventType) { msg, reloadToday ->
             message = msg
-            if (reloadToday) {
-                today = try { repo.call { repo.api.today() } } catch (_: Exception) { null }
-            }
+            if (reloadToday) refreshToday()
             busy = false
         }
     }
@@ -210,6 +222,11 @@ fun HomeScreen(repo: Repository, onLoggedOut: () -> Unit) {
         }
 
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onOpenHistory) { Text("تاریخچهٔ کارکرد") }
+            OutlinedButton(onClick = onOpenLeave) { Text("درخواست مرخصی") }
+        }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
