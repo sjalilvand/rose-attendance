@@ -11,7 +11,7 @@ import {
   minutesToHM,
 } from '../lib/jalali'
 
-/** کارکرد روزانه — ماه شمسی جاری و دو ماه قبل (پنجره سه‌ماهه مصوب). */
+/** کارکرد روزانه به‌صورت جدول — ماه شمسی جاری و دو ماه قبل (پنجره سه‌ماهه مصوب). */
 export default function HistoryPage() {
   const today = jalaliToday()
   const [cursor, setCursor] = useState({ jy: today.jy, jm: today.jm })
@@ -77,68 +77,93 @@ export default function HistoryPage() {
         <div className="card muted">در این ماه رکوردی یافت نشد.</div>
       )}
 
-      {rows?.map((row) => (
-        <section className="card day-card" key={`${row.shift_date}-${row.shift_code ?? 'x'}`}>
-          <div className="row between">
-            <div className="h3">{formatJalaliDate(row.shift_date)}</div>
-            <div className="chips">
-              {row.is_holiday && <Chip value="HOLIDAY" />}
-              {row.shift_code ? <span className="chip chip-muted">{row.shift_code}</span> : <Chip value="PENDING" />}
-            </div>
+      {rows !== null && rows.length > 0 && (
+        <section className="card">
+          <div className="table-scroll">
+            <table className="data-table daily-table">
+              <thead>
+                <tr>
+                  <th>تاریخ</th>
+                  <th>شیفت</th>
+                  <th>ورود</th>
+                  <th>خروج</th>
+                  <th>کارکرد</th>
+                  <th>استراحت</th>
+                  <th>تأخیر</th>
+                  <th>تعجیل</th>
+                  <th>اضافه‌کاری</th>
+                  <th>غیبت</th>
+                  <th>وضعیت</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const overtimeTotal = row.overtime_approved_minutes || row.overtime_proposed_minutes
+                  const proposedExtra = row.overtime_proposed_minutes > row.overtime_approved_minutes
+                  return (
+                    <tr key={`${row.shift_date}-${row.shift_code ?? 'x'}`}>
+                      <td>{formatJalaliDate(row.shift_date)}</td>
+                      <td>{row.shift_code ?? '—'}</td>
+                      <td>{formatTime(row.first_in)}</td>
+                      <td>{formatTime(row.last_out)}</td>
+                      <td>{minutesToHM(row.accepted_work_minutes)}</td>
+                      <td>{minutesToHM(row.rest_minutes)}</td>
+                      <td>{row.late_minutes > 0 ? minutesToHM(row.late_minutes) : '—'}</td>
+                      <td>{row.early_leave_minutes > 0 ? minutesToHM(row.early_leave_minutes) : '—'}</td>
+                      <td>
+                        {overtimeTotal ? (
+                          <>
+                            {minutesToHM(overtimeTotal)}
+                            {proposedExtra && (
+                              <span
+                                className="ot-star"
+                                title={`${faDigits(row.overtime_proposed_minutes)} دقیقه پیشنهاد — در انتظار تأیید`}
+                              >
+                                *
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td>{row.absence_minutes > 0 ? minutesToHM(row.absence_minutes) : '—'}</td>
+                      <td>
+                        <div className="cell-chips">
+                          {row.is_holiday && <Chip value="HOLIDAY" />}
+                          {row.shift_code ? (
+                            <span className="chip chip-muted">{row.shift_code}</span>
+                          ) : (
+                            <Chip value="PENDING" />
+                          )}
+                          {row.incomplete_sessions > 0 && <Chip value="OPEN" />}
+                          {row.flags.includes('ABSENT') && <Chip value="ABSENT" />}
+                          {row.flags
+                            .filter((f) => f.startsWith('LATE') || f.startsWith('EARLY'))
+                            .map((f) => (
+                              <Chip key={f} value={f} />
+                            ))}
+                          {Object.entries(row.leave_minutes_by_type).map(([code, minutes]) => (
+                            <span key={code} className="chip chip-info">
+                              مرخصی {code}: {faDigits(minutes)} دقیقه
+                            </span>
+                          ))}
+                          {row.mission_minutes > 0 && (
+                            <span className="chip chip-info">مأموریت: {faDigits(row.mission_minutes)} دقیقه</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
-          <div className="day-grid">
-            <Metric label="ورود" value={formatTime(row.first_in)} />
-            <Metric label="خروج" value={formatTime(row.last_out)} />
-            <Metric label="کارکرد" value={minutesToHM(row.accepted_work_minutes)} />
-            <Metric label="استراحت" value={minutesToHM(row.rest_minutes)} />
-            <Metric label="تأخیر" value={minutesToHM(row.late_minutes)} />
-            <Metric label="تعجیل" value={minutesToHM(row.early_leave_minutes)} />
-            <Metric
-              label="اضافه‌کاری"
-              value={minutesToHM(row.overtime_approved_minutes || row.overtime_proposed_minutes)}
-              hint={
-                row.overtime_proposed_minutes > row.overtime_approved_minutes
-                  ? `${faDigits(row.overtime_proposed_minutes)} دقیقه پیشنهاد — در انتظار تأیید`
-                  : undefined
-              }
-            />
-            <Metric label="غیبت" value={minutesToHM(row.absence_minutes)} />
-          </div>
-          {Object.keys(row.leave_minutes_by_type).length > 0 && (
-            <div className="chips">
-              {Object.entries(row.leave_minutes_by_type).map(([code, minutes]) => (
-                <span key={code} className="chip chip-info">
-                  مرخصی {code}: {faDigits(minutes)} دقیقه
-                </span>
-              ))}
-            </div>
-          )}
-          {row.mission_minutes > 0 && (
-            <div className="chips">
-              <span className="chip chip-info">مأموریت: {faDigits(row.mission_minutes)} دقیقه</span>
-            </div>
-          )}
-          <div className="chips">
-            {row.incomplete_sessions > 0 && <Chip value="OPEN" />}
-            {row.flags.includes('ABSENT') && <Chip value="ABSENT" />}
-            {row.flags
-              .filter((f) => f.startsWith('LATE') || f.startsWith('EARLY'))
-              .map((f) => (
-                <Chip key={f} value={f} />
-              ))}
-          </div>
+          <p className="daily-note">
+            * اضافه‌کاری پیشنهادشده هنوز تأیید نشده است. «—» یعنی صفر یا موردی ثبت نشده. وضعیت مرخصی/مأموریت/پرچم‌های روز در ستون «وضعیت» آمده.
+          </p>
         </section>
-      ))}
-    </div>
-  )
-}
-
-function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="metric">
-      <div className="metric-value">{value}</div>
-      <div className="metric-label">{label}</div>
-      {hint && <div className="metric-hint">{hint}</div>}
+      )}
     </div>
   )
 }

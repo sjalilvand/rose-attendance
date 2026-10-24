@@ -10,7 +10,8 @@ import {
   type LeaveTypeInfo,
   type MyRequest,
 } from '../lib/api'
-import { formatJalaliDateTime, minutesToHM } from '../lib/jalali'
+import { formatJalaliDateTime, jalaliToday, minutesToHM, toGregorian } from '../lib/jalali'
+import JalaliDateInput from '../components/JalaliDateInput'
 
 const STATUS_CLASS: Record<string, string> = {
   APPROVED: 'chip chip-ok',
@@ -32,6 +33,29 @@ function toIso(value: string): string {
   return value ? new Date(value).toISOString() : ''
 }
 
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+/** بخش تاریخ 'YYYY-MM-DD' از مقدار datetime محلی. */
+const datePart = (s: string): string => s.slice(0, 10)
+
+/** بخش ساعت 'HH:mm' از مقدار datetime محلی. */
+const timePart = (s: string): string => s.slice(11, 16)
+
+/** امروز به وقت تهران به‌صورت رشتهٔ تاریخ میلادی محلی 'YYYY-MM-DD'. */
+function tehranTodayIso(): string {
+  const t = jalaliToday()
+  const g = toGregorian(t.jy, t.jm, t.jd)
+  return `${g.getFullYear()}-${pad2(g.getMonth() + 1)}-${pad2(g.getDate())}`
+}
+
+function defaultStart(): string {
+  return `${tehranTodayIso()}T09:00`
+}
+
+function defaultEnd(): string {
+  return `${tehranTodayIso()}T17:00`
+}
+
 export default function RequestsPage() {
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeInfo[]>([])
   const [balances, setBalances] = useState<LeaveBalanceRow[]>([])
@@ -41,8 +65,8 @@ export default function RequestsPage() {
   const [subject, setSubject] = useState('')
   const [destination, setDestination] = useState('')
   const [description, setDescription] = useState('')
-  const [startsAt, setStartsAt] = useState('')
-  const [endsAt, setEndsAt] = useState('')
+  const [startsAt, setStartsAt] = useState(defaultStart)
+  const [endsAt, setEndsAt] = useState(defaultEnd)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -94,8 +118,8 @@ export default function RequestsPage() {
       setSubject('')
       setDestination('')
       setDescription('')
-      setStartsAt('')
-      setEndsAt('')
+      setStartsAt(defaultStart())
+      setEndsAt(defaultEnd())
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ثبت درخواست ناموفق بود')
@@ -177,11 +201,37 @@ export default function RequestsPage() {
           <div className="grid2">
             <label className="field-row">
               <span>از (تاریخ و ساعت)</span>
-              <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} required />
+              <span className="jalali-datetime">
+                <JalaliDateInput
+                  value={datePart(startsAt)}
+                  onChange={(iso) => setStartsAt(`${iso}T${timePart(startsAt) || '09:00'}`)}
+                  ariaLabel="تاریخ شروع شمسی"
+                />
+                <input
+                  type="time"
+                  value={timePart(startsAt)}
+                  onChange={(e) => setStartsAt(`${datePart(startsAt)}T${e.target.value || '09:00'}`)}
+                  aria-label="ساعت شروع"
+                  required
+                />
+              </span>
             </label>
             <label className="field-row">
-              <span>تا</span>
-              <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} required />
+              <span>تا (تاریخ و ساعت)</span>
+              <span className="jalali-datetime">
+                <JalaliDateInput
+                  value={datePart(endsAt)}
+                  onChange={(iso) => setEndsAt(`${iso}T${timePart(endsAt) || '17:00'}`)}
+                  ariaLabel="تاریخ پایان شمسی"
+                />
+                <input
+                  type="time"
+                  value={timePart(endsAt)}
+                  onChange={(e) => setEndsAt(`${datePart(endsAt)}T${e.target.value || '17:00'}`)}
+                  aria-label="ساعت پایان"
+                  required
+                />
+              </span>
             </label>
           </div>
 
