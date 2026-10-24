@@ -22,6 +22,7 @@ import ir.rose.attendance.ui.HomeScreen
 import ir.rose.attendance.ui.LeaveScreen
 import ir.rose.attendance.ui.LoginScreen
 import ir.rose.attendance.ui.ManagerScreen
+import ir.rose.attendance.ui.MessagesScreen
 import ir.rose.attendance.ui.theme.RoseTheme
 
 /**
@@ -58,12 +59,14 @@ private fun AppRoot() {
             "history" -> HistoryScreen(repo = repo, onBack = { screen = "home" })
             "leave" -> LeaveScreen(repo = repo, onBack = { screen = "home" })
             "review" -> ManagerScreen(repo = repo, onBack = { screen = "home" })
+            "messages" -> MessagesScreen(repo = repo, onBack = { screen = "home" })
             else -> HomeScreen(
                 repo = repo,
                 onLoggedOut = { loggedIn = false },
                 onOpenHistory = { screen = "history" },
                 onOpenLeave = { screen = "leave" },
                 onOpenReview = { screen = "review" },
+                onOpenMessages = { screen = "messages" },
             )
         }
     } else {

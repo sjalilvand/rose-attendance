@@ -12,6 +12,8 @@ import RequestsPage from './pages/RequestsPage'
 import ApprovalsPage from './pages/ApprovalsPage'
 import ImportPage from './pages/ImportPage'
 import OrgPage from './pages/OrgPage'
+import MessagesPage from './pages/MessagesPage'
+import NotificationsPage from './pages/NotificationsPage'
 import ReportsPage from './pages/ReportsPage'
 import SettingsPage from './pages/SettingsPage'
 import './styles.css'
@@ -104,6 +106,22 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ReportsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/messages"
+        element={
+          <RequireAuth>
+            <MessagesPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/notifications"
+        element={
+          <RequireAuth>
+            <NotificationsPage />
           </RequireAuth>
         }
       />

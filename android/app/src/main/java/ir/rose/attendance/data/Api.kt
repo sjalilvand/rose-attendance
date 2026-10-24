@@ -17,6 +17,7 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 /** Endpoints مصرفی اسکلت — همان قرارداد /api/v1 سرور. */
@@ -96,6 +97,31 @@ interface RoseApi {
     /** تأیید اضافه‌کاری با کل مبلغ پیشنهادی. */
     @POST("api/v1/attendance/overtime/approve/")
     suspend fun approveOvertime(@Body body: OvertimeApproveReq): OvertimeApproveResp
+
+    // ------------------------------------------- گام ۵ — پیام‌ها
+
+    /** مخاطبان مجاز گفتگو (بر اساس نقش — همان قواعد §12). */
+    @GET("api/v1/messages/partners/")
+    suspend fun partners(): PartnersResp
+
+    @GET("api/v1/messages/conversations/")
+    suspend fun conversations(): ConversationsResp
+
+    /** گرفتن/ساخت گفتگوی دوطرفه با یک مخاطب مجاز. */
+    @POST("api/v1/messages/conversations/")
+    suspend fun openConversation(@Body body: OpenConvReq): ConversationRow
+
+    /** رشتهٔ پیام‌ها (صعودی، تا ۲۰۰) — واکشی، پیام‌های طرف مقابل را «خوانده‌شده» می‌کند. */
+    @GET("api/v1/messages/conversations/{id}/messages/")
+    suspend fun thread(@Path("id") id: Long): ThreadResp
+
+    /** ارسال پیام (client_uuid برای ارسال مجدد آفلاین idempotent است). */
+    @POST("api/v1/messages/conversations/{id}/send/")
+    suspend fun sendMessage(@Path("id") id: Long, @Body body: SendBody): ChatMessageRow
+
+    /** بج نخواندهٔ ناوبری: پیام‌ها + اعلان‌ها. */
+    @GET("api/v1/messages/notifications/unread/")
+    suspend fun unreadBadge(): UnreadBadge
 }
 
 @kotlinx.serialization.Serializable

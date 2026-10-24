@@ -80,6 +80,32 @@ def _push_to_user_groups(targets: list[int], *, kind: str, title: str,
             pass
 
 
+def push_to_employees(*, employees, kind: str, payload: dict) -> None:
+    """Best-effort live push to a set of Employee files (chat transport).
+
+    Chat messages have their own durable table; the socket is only the
+    real-time transport, so unlike notify_employee no Notification row is
+    written here. The push is deferred to transaction.on_commit so recipients
+    never receive an event whose row could still roll back.
+    """
+    from django.db import transaction
+
+    from apps.people.models import User
+
+    employee_ids = [e.id for e in employees if e is not None]
+    if not employee_ids:
+        return
+    user_ids = list(
+        User.objects.filter(is_active=True, employee_id__in=employee_ids).values_list("id", flat=True)
+    )
+    if not user_ids:
+        return
+    created_at = timezone.now()
+    transaction.on_commit(
+        lambda: _push_to_user_groups(user_ids, kind=kind, title="", payload=payload, created_at=created_at)
+    )
+
+
 def notify_branch_managers(*, branch_id: int, kind: str, title: str,
                            payload: dict | None = None) -> None:
     """Alert the BRANCH_MANAGERs of one branch (review-flow completion).

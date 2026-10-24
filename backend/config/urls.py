@@ -35,6 +35,11 @@ from apps.reports.api import (
     MonthlySummaryViewSet,
     YearTrendPreviewView,
 )
+from apps.messaging.api import (
+    ConversationViewSet,
+    MessagePartnerViewSet,
+    NotificationViewSet,
+)
 from apps.ops.api import HealthView
 from apps.scheduling.api import ShiftViewSet
 
@@ -53,6 +58,9 @@ router.register("org/regions", RegionViewSet, basename="org-regions")
 router.register("org/branches", BranchViewSet, basename="org-branches")
 router.register("scheduling/shifts", ShiftViewSet, basename="scheduling-shifts")
 router.register("leaves/ledger", LeaveLedgerViewSet, basename="leave-ledger")
+router.register("messages/partners", MessagePartnerViewSet, basename="msg-partners")
+router.register("messages/conversations", ConversationViewSet, basename="msg-conversations")
+router.register("messages/notifications", NotificationViewSet, basename="msg-notifications")
 
 api_v1 = [
     path("auth/token/", TokenObtainPairWithLockoutView.as_view(), name="token-obtain-pair"),

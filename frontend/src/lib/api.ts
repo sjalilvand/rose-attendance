@@ -830,3 +830,107 @@ export function adjustLedger(payload: {
 }): Promise<LedgerEntry> {
   return apiFetch('/leaves/ledger/adjust/', { method: 'POST', body: JSON.stringify(payload) })
 }
+
+// ---------------------------------------------------------------------------
+// Messaging — direct conversations, chat, notification inbox (§12 v1)
+// ---------------------------------------------------------------------------
+export interface PartnerRow {
+  id: number
+  personnel_code: string
+  full_name: string
+  job_title: string
+  branch_name: string
+}
+
+export interface ConvPartner {
+  id: number
+  personnel_code: string
+  full_name: string
+  branch_name: string
+}
+
+export interface ConvLastMessage {
+  body: string
+  sender_id: number
+  mine: boolean
+  created_at: string
+}
+
+export interface ConversationRow {
+  id: number
+  kind: string
+  partner: ConvPartner | null
+  last_message: ConvLastMessage | null
+  unread_count: number
+}
+
+export interface ChatMessage {
+  id: number
+  body: string
+  sender_id: number
+  mine: boolean
+  created_at: string
+  read_at: string | null
+}
+
+export interface ThreadResp {
+  conversation: ConversationRow
+  results: ChatMessage[]
+}
+
+export interface NotificationRow {
+  id: number
+  kind: string
+  title: string
+  payload: Record<string, unknown>
+  read: boolean
+  created_at: string
+}
+
+export interface UnreadBadge {
+  messages: number
+  notifications: number
+}
+
+export function fetchPartners(): Promise<{ count: number; results: PartnerRow[] }> {
+  return apiFetch('/messages/partners/')
+}
+
+export function fetchConversations(): Promise<{ count: number; results: ConversationRow[] }> {
+  return apiFetch('/messages/conversations/')
+}
+
+export function openConversation(partnerId: number): Promise<ConversationRow> {
+  return apiFetch('/messages/conversations/', {
+    method: 'POST',
+    body: JSON.stringify({ partner_id: partnerId }),
+  })
+}
+
+export function fetchThread(convId: number): Promise<ThreadResp> {
+  return apiFetch(`/messages/conversations/${convId}/messages/`)
+}
+
+export function sendMessage(convId: number, body: string, clientUuid?: string): Promise<ChatMessage> {
+  return apiFetch(`/messages/conversations/${convId}/send/`, {
+    method: 'POST',
+    body: JSON.stringify({ body, ...(clientUuid ? { client_uuid: clientUuid } : {}) }),
+  })
+}
+
+export function fetchNotifications(): Promise<{ count: number; unread: number; results: NotificationRow[] }> {
+  return apiFetch('/messages/notifications/')
+}
+
+export function markAllNotificationsRead(): Promise<{ marked: number }> {
+  return apiFetch('/messages/notifications/read-all/', { method: 'POST' })
+}
+
+export function fetchUnreadBadge(): Promise<UnreadBadge> {
+  return apiFetch('/messages/notifications/unread/')
+}
+
+/** Ask the Layout to refresh the unread badge immediately (after read). */
+export function pokeBadge(): void {
+  window.dispatchEvent(new Event('rose:refresh-badge'))
+}

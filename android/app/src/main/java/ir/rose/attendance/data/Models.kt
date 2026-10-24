@@ -339,3 +339,84 @@ data class OvertimeApproveResp(
     val status: String = "",
     val approved_minutes: Int = 0,
 )
+
+// ------------------------------------------- گام ۵ — پیام‌ها (§12 v1)
+
+/** مخاطب مجاز گفتگو از /messages/partners/. */
+@Serializable
+data class PartnerRow(
+    val id: Long = 0,
+    val personnel_code: String = "",
+    val full_name: String = "",
+    val job_title: String = "",
+    val branch_name: String = "",
+)
+
+@Serializable
+data class PartnersResp(
+    val count: Int = 0,
+    val results: List<PartnerRow> = emptyList(),
+)
+
+@Serializable
+data class ConvPartner(
+    val id: Long = 0,
+    val personnel_code: String = "",
+    val full_name: String = "",
+    val branch_name: String = "",
+)
+
+@Serializable
+data class ConvLastMessage(
+    val body: String = "",
+    val sender_id: Long = 0,
+    val mine: Boolean = false,
+    val created_at: String = "",
+)
+
+@Serializable
+data class ConversationRow(
+    val id: Long = 0,
+    val kind: String = "DIRECT",
+    val partner: ConvPartner? = null,
+    val last_message: ConvLastMessage? = null,
+    val unread_count: Int = 0,
+)
+
+@Serializable
+data class ConversationsResp(
+    val count: Int = 0,
+    val results: List<ConversationRow> = emptyList(),
+)
+
+@Serializable
+data class OpenConvReq(val partner_id: Long)
+
+@Serializable
+data class ChatMessageRow(
+    val id: Long = 0,
+    val body: String = "",
+    val sender_id: Long = 0,
+    val mine: Boolean = false,
+    val created_at: String = "",
+    val read_at: String? = null,
+)
+
+@Serializable
+data class ThreadResp(
+    val conversation: ConversationRow = ConversationRow(),
+    val results: List<ChatMessageRow> = emptyList(),
+)
+
+@Serializable
+data class SendBody(
+    val body: String,
+    val client_uuid: String? = null,
+)
+
+/** بج نخواندهٔ ناوبری — /messages/notifications/unread/. */
+@Serializable
+data class UnreadBadge(
+    val messages: Int = 0,
+    val notifications: Int = 0,
+)

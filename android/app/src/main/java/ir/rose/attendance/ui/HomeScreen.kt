@@ -41,6 +41,8 @@ import ir.rose.attendance.data.MeInfo
 import ir.rose.attendance.data.PunchRequest
 import ir.rose.attendance.data.Repository
 import ir.rose.attendance.data.TodayCard
+import ir.rose.attendance.data.UnreadBadge
+import ir.rose.attendance.data.Jalali
 import java.time.OffsetDateTime
 import java.util.UUID
 import kotlinx.coroutines.launch
@@ -71,6 +73,7 @@ fun HomeScreen(
     onOpenHistory: () -> Unit = {},
     onOpenLeave: () -> Unit = {},
     onOpenReview: () -> Unit = {},
+    onOpenMessages: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -79,6 +82,7 @@ fun HomeScreen(
     var me by remember { mutableStateOf<MeInfo?>(null) }
     var today by remember { mutableStateOf<TodayCard?>(null) }
     var balances by remember { mutableStateOf<BalancesResp?>(null) }
+    var unread by remember { mutableStateOf<UnreadBadge?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var pendingPunch by remember { mutableStateOf<String?>(null) }
@@ -124,6 +128,11 @@ fun HomeScreen(
         } catch (_: Exception) {
             null
         }
+        unread = try {
+            repo.call { repo.api.unreadBadge() }
+        } catch (_: Exception) {
+            null // بدون پروندهٔ پرسنلی بج ندارد
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -140,12 +149,15 @@ fun HomeScreen(
         onDispose { live.stop() }
     }
 
-    // تصمیم‌های رسیدگی/اضافه‌کاری → کارت امروز تازه شود.
+    // پیام جدید → بج نخوانده تازه شود
     LaunchedEffect(Unit) {
         live.notifications.collect { list ->
             val latest = list.firstOrNull() ?: return@collect
             if (latest.kind in REVIEW_KINDS) {
                 today = try { repo.call { repo.api.today() } } catch (_: Exception) { null }
+            }
+            if (latest.kind in setOf("MESSAGE_NEW", "MESSAGE_READ")) {
+                unread = try { repo.call { repo.api.unreadBadge() } } catch (_: Exception) { null }
             }
         }
     }
@@ -227,6 +239,12 @@ fun HomeScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = onOpenHistory) { Text("تاریخچهٔ کارکرد") }
             OutlinedButton(onClick = onOpenLeave) { Text("درخواست مرخصی") }
+        }
+
+        // گام ۵ — پیام‌ها با بج نخوانده
+        OutlinedButton(onClick = onOpenMessages) {
+            val count = unread?.messages ?: 0
+            Text(if (count > 0) "پیام‌ها (${Jalali.faDigits(count.toString())} نخوانده)" else "پیام‌ها")
         }
 
         // گام ۴ — رسیدگی مدیران؛ فقط برای نقش‌های تصمیم‌گیر نشان داده می‌شود
