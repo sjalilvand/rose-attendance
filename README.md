@@ -148,7 +148,7 @@ cd C:\rose-attendance
 - **[نسخه PDF سند](docs/REQUIREMENTS.pdf)** — نسخه رسمی قابل چاپ و امضا.
 - **[موارد تصویب‌شده (بخش ۳۴)](docs/REQUIREMENTS.md#۳۴-موارد-تصویب‌شده-نسخه-۲۱)** — ده تصمیم قطعی‌شده با تأیید کارفرما در نسخه ۲٫۱؛ مبنای طراحی و قرارداد.
 - **[فاز ۱ ـ تحلیل نهایی](docs/analysis/README.md)** — [مدل داده نهایی و ERD](docs/analysis/01-data-model.md) · [DDL اسکلت PostgreSQL](docs/analysis/schema.sql) · [قواعد محاسبه کارکرد](docs/analysis/02-calculation-rules.md) · [طراحی صفحات Android و PWA](docs/analysis/03-screens.md).
-- **[بک‌اند Django](backend/README.md)** — مدل‌ها، موتور تردد و محاسبات، API نسخه ۱، WebSocket، Celery و ۱۵۶ تست خط لوله.
+- **[بک‌اند Django](backend/README.md)** — مدل‌ها، موتور تردد و محاسبات، API نسخه ۱، WebSocket، Celery و ۱۸۲ تست خط لوله.
 - **[PWA پرسنل](frontend/README.md)** — گام ۲ فاز ۲: صفحات، معماری آفلاین و اجرای محلی.
 
 ## نکته امنیتی
