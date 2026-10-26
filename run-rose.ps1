@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  مدیریت اجرای سامانه رز سفید بدون Docker — نسخه ۳ (WinSW / NSSM).
+  مدیریت اجرای سامانه رز سفید بدون Docker — نسخه ۳.۳ (WinSW / NSSM).
 
 .DESCRIPTION
   پورت‌ها: بک‌اند 3005 و وب 8085.
@@ -25,6 +25,9 @@ param(
   [switch]$Start,
   [switch]$Stop,
   [switch]$Restart,
+  [switch]$WithPostgres,
+  [string]$PostgresBin = "",
+  [string]$PostgresData = "",
   [switch]$Status
 )
 
@@ -132,7 +135,7 @@ function Install-Winsw($svc) {
   $dir = "$winswDir\$($svc.Name)"
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   $exe = "$dir\$($svc.Name).exe"
-  Copy-Item $winswExe $exe -Force
+  $xmlPath = "$dir\$($svc.Name).xml"
 
   $envXml = foreach ($k in $envPairs.Keys) {
     '  <env name="' + (Escape-Xml $k) + '" value="' + (Escape-Xml ([string]$envPairs[$k])) + '"/>'
@@ -155,16 +158,30 @@ function Install-Winsw($svc) {
     $stopXml +
     '  <logpath>' + (Escape-Xml "$stack\logs") + "</logpath>`r`n" +
     '  <log mode="roll-by-size">' + "`r`n" +
-    "    <sizeThreshold>10240</sizeThreshold>`r`n" +
+    "    <sizeThreshold>10485760</sizeThreshold>`r`n" +
     "    <keepFiles>8</keepFiles>`r`n" +
     "  </log>`r`n" +
     '  <onfailure action="restart" delay="10 sec"/>' + "`r`n" +
     ($depXml -join "`r`n") + "`r`n" +
     ($envXml -join "`r`n") + "`r`n" +
     "</service>`r`n"
-  [System.IO.File]::WriteAllText("$dir\$($svc.Name).xml", $xml, (New-Object System.Text.UTF8Encoding($false)))
 
-  # WinSW در هر بار اجرای سرویس XML را می‌خواند؛ فقط اولین بار install لازم است
+  $svcExists = [bool](Get-Service $svc.Name -ErrorAction SilentlyContinue)
+  $needInstall = $false
+  if ($svcExists) {
+    $oldXml = ''
+    if (Test-Path $xmlPath) { $oldXml = [System.IO.File]::ReadAllText($xmlPath) }
+    if ($oldXml -ne $xml) { $needInstall = $true }
+  }
+  if ($needInstall) {
+    Write-Host ("     به‌روزرسانی پیکربندی سرویس " + $svc.Name + " ...")
+    & sc.exe stop $svc.Name | Out-Null
+    Start-Sleep -Seconds 2
+    & $exe uninstall | Out-Null
+    Start-Sleep -Seconds 1
+  }
+  if ($needInstall -or -not (Test-Path $exe)) { Copy-Item $winswExe $exe -Force }
+  [System.IO.File]::WriteAllText($xmlPath, $xml, (New-Object System.Text.UTF8Encoding($false)))
   if (-not (Get-Service $svc.Name -ErrorAction SilentlyContinue)) {
     & $exe install | Out-Null
   }
@@ -172,6 +189,121 @@ function Install-Winsw($svc) {
 
 function Install-One($svc) {
   if ($script:SvcTool -eq 'nssm') { Install-Nssm $svc } else { Install-Winsw $svc }
+}
+
+# ------------------------- PostgreSQL (سرویس اختیاری — -WithPostgres) -------------------------
+function Resolve-PostgresPaths {
+  $script:RosePgBin = $PostgresBin
+  $script:RosePgData = $PostgresData
+  if (-not $script:RosePgBin) {
+    $cands = @()
+    if (Test-Path "$stack\stack-env.ps1") {
+      try { . "$stack\stack-env.ps1" } catch { }
+      if ($RosePsql) { $cands += (Split-Path $RosePsql -Parent) }
+    }
+    $cands += 'C:\rosepsy\runtime\pgsql\bin'
+    $cands += 'C:\Program Files\PostgreSQL\16\bin'
+    foreach ($c in $cands) {
+      if ($c -and (Test-Path (Join-Path $c 'postgres.exe'))) { $script:RosePgBin = $c; break }
+    }
+  }
+  if (-not $script:RosePgData) {
+    try {
+      $procs = Get-CimInstance Win32_Process -Filter "Name='postgres.exe'" -ErrorAction SilentlyContinue
+      foreach ($p in $procs) {
+        if ($p.CommandLine -match '-D\s+"?([^"\s]+)"?') { $script:RosePgData = $Matches[1]; break }
+      }
+    } catch { }
+  }
+  if (-not $script:RosePgData) {
+    foreach ($d in @('C:\rosepsy\data\pgdata', 'C:\rosepsy\data')) {
+      if (Test-Path (Join-Path $d 'PG_VERSION')) { $script:RosePgData = $d; break }
+    }
+  }
+  if (-not $script:RosePgBin -or -not $script:RosePgData) { return $false }
+  return (Test-Path (Join-Path $script:RosePgData 'PG_VERSION'))
+}
+
+function Install-PostgresService {
+  if (-not (Resolve-PostgresPaths)) {
+    Write-Warning 'با -WithPostgres مسیر PostgreSQL یافت نشد — سرویس RosePostgres ساخته نشد.'
+    return $false
+  }
+  $pgBin = $script:RosePgBin
+  $pgData = $script:RosePgData
+  Write-Host ("   PostgreSQL bin : " + $pgBin)
+  Write-Host ("   PostgreSQL data: " + $pgData)
+
+  $pgSvc = Get-CimInstance Win32_Service -Filter "Name LIKE 'postgresql%'" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($pgSvc) {
+    Write-Host ("   PostgreSQL سرویس ویندوزی خودش را دارد: " + $pgSvc.Name + " — RosePostgres ساخته نمی‌شود.")
+    return $false
+  }
+  if ($script:SvcTool -ne 'winsw') {
+    Write-Warning 'سرویس RosePostgres فقط با WinSW پشتیبانی می‌شود — رد شد.'
+    return $false
+  }
+
+  $svcName = 'RosePostgres'
+  $dir = "$winswDir\$svcName"
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  $exe = "$dir\$svcName.exe"
+  $xmlPath = "$dir\$svcName.xml"
+  $xml = '<?xml version="1.0" encoding="utf-8"?>' + "`r`n" +
+    "<service>`r`n" +
+    '  <id>RosePostgres</id>' + "`r`n" +
+    '  <name>Rose Attendance PostgreSQL</name>' + "`r`n" +
+    '  <description>Rose Attendance - PostgreSQL (local rosepsy instance)</description>' + "`r`n" +
+    '  <executable>' + (Escape-Xml (Join-Path $pgBin 'postgres.exe')) + '</executable>' + "`r`n" +
+    '  <arguments>-D "' + (Escape-Xml $pgData) + '"</arguments>' + "`r`n" +
+    '  <workingdirectory>' + (Escape-Xml $pgBin) + '</workingdirectory>' + "`r`n" +
+    '  <startmode>Automatic</startmode>' + "`r`n" +
+    '  <stopexecutable>' + (Escape-Xml (Join-Path $pgBin 'pg_ctl.exe')) + '</stopexecutable>' + "`r`n" +
+    '  <stoparguments>-D "' + (Escape-Xml $pgData) + '" -m fast stop</stoparguments>' + "`r`n" +
+    '  <serviceaccount>' + "`r`n" +
+    '    <domain>NT AUTHORITY</domain>' + "`r`n" +
+    '    <user>NetworkService</user>' + "`r`n" +
+    '  </serviceaccount>' + "`r`n" +
+    '  <logpath>' + (Escape-Xml "$stack\logs") + '</logpath>' + "`r`n" +
+    '  <log mode="roll-by-size">' + "`r`n" +
+    '    <sizeThreshold>10485760</sizeThreshold>' + "`r`n" +
+    '    <keepFiles>8</keepFiles>' + "`r`n" +
+    '  </log>' + "`r`n" +
+    '  <onfailure action="restart" delay="10 sec"/>' + "`r`n" +
+    '</service>' + "`r`n"
+
+  # دسترسی NetworkService به datadir و پوشه لاگ‌ها (اگر نباشد postgres شروع نمی‌شود)
+  & icacls $pgData /grant '*S-1-5-20:(OI)(CI)F' /T | Out-Null
+  & icacls "$stack\logs" /grant '*S-1-5-20:(OI)(CI)F' | Out-Null
+
+  [System.IO.File]::WriteAllText($xmlPath, $xml, (New-Object System.Text.UTF8Encoding($false)))
+  $svcObj = Get-Service $svcName -ErrorAction SilentlyContinue
+  if (-not $svcObj -or $svcObj.Status -ne 'Running') { Copy-Item $winswExe $exe -Force }
+  if (-not (Get-Service $svcName -ErrorAction SilentlyContinue)) {
+    & $exe install | Out-Null
+  }
+  Write-Host '   سرویس RosePostgres نصب شد.' -ForegroundColor Green
+  return $true
+}
+
+function Stop-ManualPostgres {
+  try {
+    $portBusy = Get-NetTCPConnection -State Listen -LocalPort 5432 -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $portBusy) { return }
+    Write-Host '   توقف نمونه دستی PostgreSQL برای تحویل به سرویس RosePostgres ...'
+    & (Join-Path $script:RosePgBin 'pg_ctl.exe') -D $script:RosePgData -m fast stop 2>$null | Out-Null
+    Start-Sleep -Seconds 3
+  } catch { }
+}
+
+function Show-ServiceLogTail([string]$Name, [int]$Lines = 12) {
+  foreach ($f in @("$stack\logs\$Name.err.log", "$stack\logs\$Name.out.log", "$stack\logs\$Name.wrapper.log")) {
+    if (Test-Path $f) {
+      Write-Host ("     --- آخرین لاگ: " + $f + " ---") -ForegroundColor DarkGray
+      Get-Content $f -Tail $Lines -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ("     " + $_) -ForegroundColor DarkGray }
+      break
+    }
+  }
 }
 
 # ================================ InstallServices ================================
@@ -189,6 +321,13 @@ if ($InstallServices) {
   }
   Write-Host ("   مدیر سرویس: " + $script:SvcTool)
 
+  # سرویس PostgreSQL (اختیاری — -WithPostgres): استارت خودکار پس از بوت
+  if ($WithPostgres) {
+    Write-Host '   سرویس PostgreSQL (RosePostgres) ...'
+    $pgReady = Install-PostgresService
+    if ($pgReady) { Stop-ManualPostgres }
+  }
+
   # وابستگی RoseApi به سرویس PostgreSQL (اگر سرویس آن پیدا شود)
   $pgName = Get-PgServiceName
   if ($pgName) {
@@ -202,9 +341,21 @@ if ($InstallServices) {
     Install-One $svc
   }
 
-  foreach ($name in @('RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')) {
+  $startOrder = @()
+  if (Get-Service RosePostgres -ErrorAction SilentlyContinue) { $startOrder += 'RosePostgres' }
+  $startOrder += @('RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')
+  foreach ($name in $startOrder) {
     try { Start-Service $name -ErrorAction Stop; Write-Host ("   شروع شد: " + $name) -ForegroundColor Green }
-    catch { Write-Warning ("شروع " + $name + " ناموفق: " + $_.Exception.Message) }
+    catch {
+      Write-Warning ("شروع " + $name + " ناموفق: " + $_.Exception.Message)
+      Show-ServiceLogTail $name
+      if ($name -eq 'RosePostgres') {
+        Write-Host '     سرویس RosePostgres حذف و PostgreSQL به‌صورت دستی روشن می‌شود ...' -ForegroundColor Yellow
+        if (-not $script:RosePgBin -or -not $script:RosePgData) { Resolve-PostgresPaths | Out-Null }
+        & sc.exe delete RosePostgres | Out-Null
+        & (Join-Path $script:RosePgBin 'pg_ctl.exe') -D $script:RosePgData -w start 2>$null | Out-Null
+      }
+    }
   }
   Start-Sleep -Seconds 5
   Get-Service RoseRedis, RoseApi, RoseWorker, RoseBeat, RoseNginx -ErrorAction SilentlyContinue |
@@ -221,7 +372,7 @@ if ($InstallServices) {
 # ================================ UninstallServices ================================
 if ($UninstallServices) {
   Write-Host '== حذف سرویس‌های رز سفید ==' -ForegroundColor Cyan
-  foreach ($name in @('RoseNginx', 'RoseBeat', 'RoseWorker', 'RoseApi', 'RoseRedis')) {
+  foreach ($name in @('RosePostgres', 'RoseNginx', 'RoseBeat', 'RoseWorker', 'RoseApi', 'RoseRedis')) {
     $s = Get-Service $name -ErrorAction SilentlyContinue
     if ($s) {
       if ($s.Status -eq 'Running') { Stop-Service $name -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2 }
@@ -234,7 +385,7 @@ if ($UninstallServices) {
 
 # ================================ Stop ================================
 if ($Stop) {
-  foreach ($name in @('RoseNginx', 'RoseBeat', 'RoseWorker', 'RoseApi', 'RoseRedis')) {
+  foreach ($name in @('RosePostgres', 'RoseNginx', 'RoseBeat', 'RoseWorker', 'RoseApi', 'RoseRedis')) {
     $s = Get-Service $name -ErrorAction SilentlyContinue
     if ($s -and $s.Status -eq 'Running') { Stop-Service $name -Force -ErrorAction SilentlyContinue; Write-Host ("   متوقف شد: " + $name) }
   }
@@ -244,7 +395,7 @@ if ($Stop) {
 # ================================ Start / Restart ================================
 if ($Start -or $Restart) {
   if ($Restart) { & $PSCommandPath -Stop | Out-Null; Start-Sleep -Seconds 3 }
-  foreach ($name in @('RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')) {
+  foreach ($name in @('RosePostgres', 'RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')) {
     $s = Get-Service $name -ErrorAction SilentlyContinue
     if ($s) { try { Start-Service $name -ErrorAction Stop; Write-Host ("   شروع شد: " + $name) -ForegroundColor Green } catch { Write-Warning "$name : $($_.Exception.Message)" } }
   }
@@ -298,4 +449,4 @@ if ($Console) {
 }
 
 # بدون پارامتر — راهنما
-Write-Host 'استفاده: run-rose.ps1 -InstallServices | -Console | -Status | -Start | -Stop | -Restart | -UninstallServices'
+Write-Host 'استفاده: run-rose.ps1 -InstallServices [-WithPostgres] | -Console | -Status | -Start | -Stop | -Restart | -UninstallServices'
