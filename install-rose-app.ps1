@@ -29,6 +29,8 @@
 param(
   [string]$PostgresPassword = "",
   [string]$AdminPassword = "",
+  [string]$PipIndexUrl = "",
+  [int]$PipTimeout = 60,
   [switch]$SkipFrontend,
   [string]$RepoRoot = ""
 )
@@ -45,7 +47,7 @@ $RoseWebPort = 8085
 $RoseApiPort = 3005
 
 Write-Host ''
-Write-Host '== راه‌اندازی اپلیکیشن رز سفید (بدون Docker) — نسخه ۳ ==' -ForegroundColor Cyan
+Write-Host '== راه‌اندازی اپلیکیشن رز سفید (بدون Docker) — نسخه ۳.۳ ==' -ForegroundColor Cyan
 Write-Host ("   مخزن   : " + $RepoRoot)
 Write-Host ("   پورت‌ها : وب $RoseWebPort / بک‌اند $RoseApiPort")
 
@@ -227,24 +229,64 @@ if (-not (Test-Path $venvPy)) {
   if (-not $py) { Write-Error 'Python 3.12/3.13 یافت نشد — ابتدا install-rose-prereq.ps1 را اجرا کنید.'; exit 1 }
   & $py -m venv "$stack\venv"
 }
-& $venvPy -m pip install --upgrade pip --quiet
+# --- انتخاب ایندکس PyPI (با پشتیبانی میرور برای سرورهای داخل ایران) ---
+function Test-PipIndex([string]$IndexUrl) {
+  $prevEAP = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  $probeDir = Join-Path $env:TEMP ("piptest-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+  try {
+    & $venvPy -m pip download --no-deps --quiet --disable-pip-version-check --timeout 12 --retries 1 --index-url $IndexUrl -d $probeDir six 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+  } catch { return $false }
+  finally { $ErrorActionPreference = $prevEAP; Remove-Item -Recurse -Force $probeDir -ErrorAction SilentlyContinue }
+}
+
+$PipIndex = ''
+if (-not [string]::IsNullOrWhiteSpace($PipIndexUrl)) {
+  $PipIndex = $PipIndexUrl
+  Write-Host ("   ایندکس pip (دستی): " + $PipIndex)
+} else {
+  $candidates = @(
+    'https://mirror-pypi.runflare.com/simple',
+    'https://mirrors.aliyun.com/pypi/simple/',
+    'https://pypi.tuna.tsinghua.edu.cn/simple',
+    'https://pypi.org/simple'
+  )
+  $ci = 0
+  foreach ($cand in $candidates) {
+    $ci++
+    Write-Host ("   بررسی دسترسی به PyPI (منبع $ci از $($candidates.Count)): $cand ...")
+    if (Test-PipIndex $cand) { $PipIndex = $cand; break }
+  }
+  if (-not $PipIndex) {
+    Write-Error 'هیچ منبع PyPI در دسترس نیست — اتصال اینترنت سرور را بررسی کنید یا با -PipIndexUrl یک میرور مشخص کنید.'
+    exit 1
+  }
+  Write-Host ("   ایندکس pip انتخاب‌شده: " + $PipIndex) -ForegroundColor Green
+}
+$PipArgs = @('--index-url', $PipIndex, '--timeout', "$PipTimeout", '--retries', '5')
+$env:PIP_DEFAULT_TIMEOUT = "$PipTimeout"
+
+& $venvPy -m pip install --upgrade pip --quiet @PipArgs
+if ($LASTEXITCODE -ne 0) { Write-Host '   (به‌روزرسانی pip انجام نشد — ادامه می‌دهیم)' -ForegroundColor DarkYellow }
 $lock = Join-Path $backend 'requirements.lock'
 if (Test-Path $lock) {
   Write-Host '   نصب از requirements.lock (hashed) ...'
-  & $venvPy -m pip install --require-hashes -r $lock
+  & $venvPy -m pip install --require-hashes -r $lock @PipArgs
   if ($LASTEXITCODE -ne 0) {
     Write-Warning 'نصب از lock ناموفق بود؛ تلاش با requirements.in ...'
-    & $venvPy -m pip install -r (Join-Path $backend 'requirements.in')
+    & $venvPy -m pip install -r (Join-Path $backend 'requirements.in') @PipArgs
     if ($LASTEXITCODE -ne 0) { Write-Error 'نصب وابستگی‌های پایتون ناموفق بود.'; exit 1 }
   }
 } else {
-  & $venvPy -m pip install -r (Join-Path $backend 'requirements.in')
+  & $venvPy -m pip install -r (Join-Path $backend 'requirements.in') @PipArgs
 }
 # سرور ASGI با پشتیبانی WebSocket (daphne مرجع Channels است)
 & $venvPy -m pip show daphne --quiet
 if ($LASTEXITCODE -ne 0) {
   Write-Host '   نصب daphne (سرور ASGI/WebSocket) ...'
-  & $venvPy -m pip install daphne
+  & $venvPy -m pip install daphne @PipArgs
 }
 Write-Host '   وابستگی‌های بک‌اند نصب شد.' -ForegroundColor Green
 
@@ -265,7 +307,11 @@ if (-not $SkipFrontend) {
   if ($npmCmd) {
     Push-Location $frontend
     & npm ci
-    if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'npm ci ناموفق بود.'; exit 1 }
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning 'npm ci ناموفق بود؛ تلاش با میرور registry.npmmirror.com ...'
+      & npm ci --registry=https://registry.npmmirror.com --fetch-retries=3 --fetch-retry-maxtimeout=60000 --fetch-timeout=300000
+      if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'npm ci ناموفق بود.'; exit 1 }
+    }
     & npm run build
     if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'npm run build ناموفق بود.'; exit 1 }
     Pop-Location
@@ -282,10 +328,19 @@ Write-Host '-- ۷/۷ کاربر مدیر (اختیاری) --' -ForegroundColor Y
 if (-not [string]::IsNullOrWhiteSpace($AdminPassword)) {
   $env:DJANGO_SUPERUSER_PASSWORD = $AdminPassword
   Push-Location $backend
-  & $venvPy manage.py createsuperuser --noinput --username admin
+  $adminExists = ''
+  try {
+    $adminExists = (& $venvPy manage.py shell -c "from django.contrib.auth import get_user_model; print(get_user_model().objects.filter(username='admin').exists())" 2>$null | Select-Object -Last 1)
+  } catch { $adminExists = '' }
+  if ("$adminExists".Trim() -eq 'True') {
+    Write-Host '   کاربر admin از قبل موجود است — رمز تغییر نکرد.' -ForegroundColor Yellow
+    Write-Host '   تغییر رمز:  cd C:\rose-attendance\backend ; C:\rose-stack\venv\Scripts\python.exe manage.py changepassword admin'
+  } else {
+    & $venvPy manage.py createsuperuser --noinput --username admin
+    if ($LASTEXITCODE -eq 0) { Write-Host '   کاربر admin ساخته شد (نام کاربری: admin).' }
+  }
   Pop-Location
   Remove-Item Env:\DJANGO_SUPERUSER_PASSWORD -ErrorAction SilentlyContinue
-  Write-Host '   کاربر admin ساخته شد (نام کاربری: admin).'
 } else {
   Write-Host '   رد شد — بعداً اجرا کنید:'
   Write-Host '   $env:DJANGO_SUPERUSER_PASSWORD="رمز-دلخواه"; cd C:\rose-attendance\backend; C:\rose-stack\venv\Scripts\python.exe manage.py createsuperuser --noinput --username admin'
