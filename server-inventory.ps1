@@ -39,7 +39,7 @@ function Strip-Nulls([string]$s) {
 
 function YesNo($v) { if ($v) { 'YES' } else { 'NO' } }
 
-function Safe(& $block) {
+function Safe([scriptblock]$block) {
   try { return & $block } catch { return "ERROR: $($_.Exception.Message)" }
 }
 

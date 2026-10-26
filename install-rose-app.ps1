@@ -1,0 +1,236 @@
+﻿#Requires -Version 5.1
+<#
+.SYNOPSIS
+  راه‌اندازی اپلیکیشن «رز سفید» بدون Docker: دیتابیس، وابستگی‌های بک‌اند،
+  build فرانت‌اند، مهاجرت‌ها و فایل‌های env.
+
+.DESCRIPTION
+  پیش‌نیاز: install-rose-prereq.ps1 اجرا شده باشد و مخزن در C:\rose-attendance باشد.
+  این اسکریپت:
+    ۱) secrets تصادفی می‌سازد (django_secret / db_password)
+    ۲) در PostgreSQL دیتابیس rose_attendance و کاربر rose_app + افزونه PostGIS می‌سازد
+    ۳) venv پایتون می‌سازد و requirements.lock (+ daphne برای WebSocket) را نصب می‌کند
+    ۴) فایل env یکپارچه C:\rose-stack\rose-backend.env را تولید می‌کند
+    ۵) migrate و collectstatic اجرا می‌کند
+    ۶) فرانت‌اند را با npm ci + npm run build می‌سازد
+    ۷) (اختیاری) کاربر admin می‌سازد
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File .\install-rose-app.ps1 -AdminPassword "رمز-قوی"
+#>
+
+[CmdletBinding()]
+param(
+  [string]$PostgresPassword = "",
+  [string]$AdminPassword = "",
+  [switch]$SkipFrontend,
+  [string]$RepoRoot = ""
+)
+
+$ErrorActionPreference = 'Stop'
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+$ProgressPreference = 'SilentlyContinue'
+
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $PSScriptRoot }
+$stack = 'C:\rose-stack'
+$backend = Join-Path $RepoRoot 'backend'
+$frontend = Join-Path $RepoRoot 'frontend'
+
+Write-Host ''
+Write-Host '== راه‌اندازی اپلیکیشن رز سفید (بدون Docker) ==' -ForegroundColor Cyan
+Write-Host ("   مخزن   : " + $RepoRoot)
+
+# ------------------------------------------------- ۰) پیش‌نیازها -------------
+if (-not (Test-Path $backend) -or -not (Test-Path $frontend)) {
+  Write-Error "این اسکریپت باید داخل ریشه مخزن (C:\rose-attendance) اجرا شود. مسیر فعلی: $RepoRoot"
+  exit 1
+}
+$psql = @('C:\Program Files\PostgreSQL\16\bin\psql.exe',
+          'C:\Program Files\PostgreSQL\17\bin\psql.exe') |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $psql) {
+  $svc = Get-CimInstance Win32_Service -Filter "Name LIKE 'postgresql%'" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($svc -and $svc.PathName) {
+    $exe = ($svc.PathName -replace '^"([^"]+)"\s.*$', '$1')
+    $candidate = Join-Path (Split-Path (Split-Path $exe -Parent) -Parent) 'bin\psql.exe'
+    if (Test-Path $candidate) { $psql = $candidate }
+  }
+}
+if (-not $psql) { Write-Error 'psql یافت نشد — ابتدا install-rose-prereq.ps1 را اجرا کنید.'; exit 1 }
+Write-Host ("   psql   : " + $psql)
+
+# ------------------------------------------------- ۱) secrets ----------------
+Write-Host '-- ۱/۷ آماده‌سازی secrets --' -ForegroundColor Yellow
+$secretsDir = Join-Path $RepoRoot 'secrets'
+New-Item -ItemType Directory -Force -Path $secretsDir, (Join-Path $RepoRoot 'deploy\tls') | Out-Null
+foreach ($name in @('django_secret', 'db_password')) {
+  $file = Join-Path $secretsDir ($name + '.txt')
+  if (-not (Test-Path $file)) {
+    $bytes = New-Object byte[] 48
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($bytes); $rng.Dispose()
+    [System.IO.File]::WriteAllText($file, (-join ($bytes | ForEach-Object { $_.ToString('x2') })))
+    Write-Host ("   ساخته شد: secrets\" + $name + ".txt")
+  }
+}
+$dbPassword = (Get-Content (Join-Path $secretsDir 'db_password.txt') -Raw).Trim()
+
+# ------------------------------------------------- ۲) دیتابیس ----------------
+Write-Host '-- ۲/۷ ساخت دیتابیس و کاربر در PostgreSQL --' -ForegroundColor Yellow
+$pgPwFile = "$stack\secrets\pg_postgres_password.txt"
+if ([string]::IsNullOrWhiteSpace($PostgresPassword)) {
+  if (Test-Path $pgPwFile) { $PostgresPassword = (Get-Content $pgPwFile -Raw).Trim() }
+}
+if ([string]::IsNullOrWhiteSpace($PostgresPassword)) {
+  $sec = Read-Host 'رمز کاربر postgres را وارد کنید' -AsSecureString
+  $PostgresPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+}
+$env:PGPASSWORD = $PostgresPassword
+
+function Invoke-Psql([string]$sql) {
+  & $psql -h 127.0.0.1 -p 5432 -U postgres -v ON_ERROR_STOP=1 -c $sql
+  if ($LASTEXITCODE -ne 0) { throw "psql ناموفق: $sql" }
+}
+
+# تست اتصال
+& $psql -h 127.0.0.1 -p 5432 -U postgres -c "SELECT version();" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error 'اتصال به PostgreSQL با کاربر postgres ناموفق بود (رمز را بررسی کنید).'; exit 1 }
+Write-Host '   اتصال PostgreSQL برقرار است.'
+
+# کاربر rose_app
+$roleExists = & $psql -tA -h 127.0.0.1 -p 5432 -U postgres -c "SELECT 1 FROM pg_roles WHERE rolname='rose_app';"
+if ("$roleExists".Trim() -ne '1') {
+  Invoke-Psql "CREATE ROLE rose_app LOGIN PASSWORD '$dbPassword';"
+  Write-Host '   کاربر rose_app ساخته شد.'
+} else {
+  Invoke-Psql "ALTER ROLE rose_app WITH LOGIN PASSWORD '$dbPassword';"
+  Write-Host '   کاربر rose_app موجود است (رمز همگام شد).'
+}
+
+# دیتابیس rose_attendance
+$dbExists = & $psql -tA -h 127.0.0.1 -p 5432 -U postgres -c "SELECT 1 FROM pg_database WHERE datname='rose_attendance';"
+if ("$dbExists".Trim() -ne '1') {
+  Invoke-Psql "CREATE DATABASE rose_attendance OWNER rose_app;"
+  Write-Host '   دیتابیس rose_attendance ساخته شد.'
+} else {
+  Write-Host '   دیتابیس rose_attendance موجود است.'
+}
+
+# افزونه PostGIS داخل دیتابیس
+Invoke-Psql "CREATE EXTENSION IF NOT EXISTS postgis;"
+Write-Host '   افزونه PostGIS فعال است.'
+
+# ------------------------------------------------- ۳) فایل env ---------------
+Write-Host '-- ۳/۷ تولید فایل env یکپارچه --' -ForegroundColor Yellow
+$envMap = [ordered]@{
+  'DJANGO_SETTINGS_MODULE'   = 'config.settings.production'
+  'DJANGO_SECRET_KEY_FILE'   = (Join-Path $secretsDir 'django_secret.txt')
+  'DB_PASSWORD_FILE'         = (Join-Path $secretsDir 'db_password.txt')
+  'DB_HOST'                  = '127.0.0.1'
+  'DB_PORT'                  = '5432'
+  'DB_NAME'                  = 'rose_attendance'
+  'DB_USER'                  = 'rose_app'
+  'REDIS_URL'                = 'redis://127.0.0.1:6379/0'
+  'CHANNEL_REDIS_URL'        = 'redis://127.0.0.1:6379/1'
+  'DJANGO_ALLOWED_HOSTS'     = '130.185.73.157,localhost,127.0.0.1'
+  'DJANGO_CSRF_TRUSTED_ORIGINS' = 'http://130.185.73.157:8080,http://localhost'
+  'DJANGO_DEBUG'             = 'False'
+  'BUSINESS_TIME_ZONE'       = 'Asia/Tehran'
+}
+$envPath = "$stack\rose-backend.env"
+$lines = foreach ($k in $envMap.Keys) { "$k=$($envMap[$k])" }
+[System.IO.File]::WriteAllLines($envPath, $lines)
+$cmdLines = foreach ($k in $envMap.Keys) { 'set "' + $k + '=' + $envMap[$k] + '"' }
+[System.IO.File]::WriteAllLines("$stack\rose-backend-env.cmd", $cmdLines)
+Write-Host ("   نوشته شد: " + $envPath)
+
+# بارگذاری env در این نشست
+foreach ($k in $envMap.Keys) { Set-Item -Path ("env:" + $k) -Value $envMap[$k] }
+
+# ------------------------------------------------- ۴) venv و وابستگی‌ها ------
+Write-Host '-- ۴/۷ ساخت venv و نصب وابستگی‌های بک‌اند (چند دقیقه) --' -ForegroundColor Yellow
+$venvPy = "$stack\venv\Scripts\python.exe"
+if (-not (Test-Path $venvPy)) {
+  $py = $null
+  foreach ($c in @('python', 'py')) {
+    $cmd = Get-Command $c -ErrorAction SilentlyContinue
+    if ($cmd) {
+      $v = (& $cmd.Source --version 2>&1) | Out-String
+      if ($v -match 'Python\s+3\.(12|13)') { $py = $cmd.Source; break }
+    }
+  }
+  if (-not $py) { Write-Error 'Python 3.12/3.13 یافت نشد — ابتدا install-rose-prereq.ps1 را اجرا کنید.'; exit 1 }
+  & $py -m venv "$stack\venv"
+}
+& $venvPy -m pip install --upgrade pip --quiet
+$lock = Join-Path $backend 'requirements.lock'
+if (Test-Path $lock) {
+  Write-Host '   نصب از requirements.lock (hashed) ...'
+  & $venvPy -m pip install --require-hashes -r $lock
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning 'نصب از lock ناموفق بود؛ تلاش با requirements.in ...'
+    & $venvPy -m pip install -r (Join-Path $backend 'requirements.in')
+    if ($LASTEXITCODE -ne 0) { Write-Error 'نصب وابستگی‌های پایتون ناموفق بود.'; exit 1 }
+  }
+} else {
+  & $venvPy -m pip install -r (Join-Path $backend 'requirements.in')
+}
+# سرور ASGI با پشتیبانی WebSocket (daphne مرجع Channels است)
+& $venvPy -m pip show daphne --quiet
+if ($LASTEXITCODE -ne 0) {
+  Write-Host '   نصب daphne (سرور ASGI/WebSocket) ...'
+  & $venvPy -m pip install daphne
+}
+Write-Host '   وابستگی‌های بک‌اند نصب شد.' -ForegroundColor Green
+
+# ------------------------------------------------- ۵) migrate + static -------
+Write-Host '-- ۵/۷ مهاجرت دیتابیس و جمع‌آوری فایل‌های static --' -ForegroundColor Yellow
+Push-Location $backend
+& $venvPy manage.py migrate --noinput
+if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'migrate ناموفق بود (PostGIS/دیتابیس را بررسی کنید).'; exit 1 }
+& $venvPy manage.py collectstatic --noinput
+if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'collectstatic ناموفق بود.'; exit 1 }
+Pop-Location
+Write-Host '   مهاجرت‌ها و static کامل شد.' -ForegroundColor Green
+
+# ------------------------------------------------- ۶) فرانت‌اند --------------
+if (-not $SkipFrontend) {
+  Write-Host '-- ۶/۷ ساخت فرانت‌اند (npm ci + build؛ چند دقیقه) --' -ForegroundColor Yellow
+  $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+  if ($npmCmd) {
+    Push-Location $frontend
+    & npm ci
+    if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'npm ci ناموفق بود.'; exit 1 }
+    & npm run build
+    if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'npm run build ناموفق بود.'; exit 1 }
+    Pop-Location
+    Write-Host '   فرانت‌اند ساخته شد: frontend\dist' -ForegroundColor Green
+  } else {
+    Write-Warning 'npm یافت نشد — Node.js را نصب و دوباره اجرا کنید (یا با -SkipFrontend رد شوید).'
+  }
+} else {
+  Write-Host '-- ۶/۷ فرانت‌اند رد شد (-SkipFrontend) --' -ForegroundColor Yellow
+}
+
+# ------------------------------------------------- ۷) کاربر admin ------------
+Write-Host '-- ۷/۷ کاربر مدیر (اختیاری) --' -ForegroundColor Yellow
+if (-not [string]::IsNullOrWhiteSpace($AdminPassword)) {
+  $env:DJANGO_SUPERUSER_PASSWORD = $AdminPassword
+  Push-Location $backend
+  & $venvPy manage.py createsuperuser --noinput --username admin
+  Pop-Location
+  Remove-Item Env:\DJANGO_SUPERUSER_PASSWORD -ErrorAction SilentlyContinue
+  Write-Host '   کاربر admin ساخته شد (نام کاربری: admin).'
+} else {
+  Write-Host '   رد شد — بعداً اجرا کنید:'
+  Write-Host '   $env:DJANGO_SUPERUSER_PASSWORD="رمز-دلخواه"; cd C:\rose-attendance\backend; C:\rose-stack\venv\Scripts\python.exe manage.py createsuperuser --noinput --username admin'
+}
+
+# ------------------------------------------------- پایان ---------------------
+Write-Host ''
+Write-Host 'راه‌اندازی اپلیکیشن کامل شد ✓' -ForegroundColor Green
+Write-Host ''
+Write-Host 'گام بعدی — اجرای همه سرویس‌ها:' -ForegroundColor Cyan
+Write-Host '  powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -InstallServices'
+Write-Host 'سپس مرورگر:  http://130.185.73.157:8080/'
+Write-Host 'سلامت API :  http://130.185.73.157:8080/api/v1/health/'
