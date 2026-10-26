@@ -1,113 +1,143 @@
-<div dir="rtl" align="right">
+# استقرار «رز سفید» روی Windows Server بدون Docker
 
-# راهنمای استقرار بدون Docker روی Windows Server 2025 (حالت HTTP — فاز توسعه)
+این راهنما اجرای کامل سامانه روی **Windows Server 2025** بدون هیچ‌گونه Docker/WSL است.
+همه‌چیز به‌صورت سرویس‌های بومی ویندوز اجرا می‌شود و بعد از ری‌بوت سرور خودکار بالا می‌آید.
 
-این راهنما سامانه «رز سفید» را **بدون Docker** و کاملاً نیتیو روی ویندوز بالا می‌آورد: پایتون مستقیم + PostgreSQL/PostGIS نیتیو + Redis ویندوزی + Nginx برای ویندوز. معماری نهایی:
+---
 
-```text
-مرورگر/اپ  ──HTTP 8080──▶  Nginx (سرویس RoseNginx)
-                             ├─ /            → فایل‌های frontend\dist (PWA)
-                             ├─ /static/     → backend\staticfiles (پنل ادمین)
-                             ├─ /api/  /admin/ → پروکسی به Daphne (RoseApi :8000)
-                             └─ /ws/         → پروکسی WebSocket به :8000
-سرویس‌های ویندوزی: RoseRedis (127.0.0.1:6379) · RoseApi (Daphne/ASGI) ·
-                   RoseWorker + RoseBeat (Celery) · RoseNginx · postgresql-x64-16
-```
+## ۱) معماری و پورت‌ها (نسخه ۲)
 
-> پیش‌نیاز سخت‌افزاری: رم ≥ ۸ گیگ، فضای خالی C ≥ ۳۰ گیگ، دسترسی اینترنت برای دانلود نصب‌کننده‌ها.
+| جزء | سرویس ویندوزی | پورت | توضیح |
+|---|---|---|---|
+| Nginx (درگاه) | `RoseNginx` | **8085** | سرو PWA + پروکسی API/WS/ادمین — از اینترنت در دسترس |
+| Django + Channels (Daphne) | `RoseApi` | **3005** | ASGI با پشتیبانی WebSocket — از اینترنت هم در دسترس |
+| Celery Worker | `RoseWorker` | — | صف‌ها (pool=solo مخصوص ویندوز) |
+| Celery Beat | `RoseBeat` | — | کارهای زمان‌بندی‌شده |
+| Redis (tporadowski 5.0.14) | `RoseRedis` | 6379 | فقط localhost — بروکر Celery + channel layer |
+| PostgreSQL 16 | `postgresql-x64-16` | 5432 | فقط localhost — دیتابیس `rose_attendance` |
 
-## گام ۱ — جمع‌آوری مشخصات سرور (توصیه‌شده)
+- آدرس وب‌اپ: `http://130.185.73.157:8085/`
+- پنل ادمین: `http://130.185.73.157:8085/admin/` (با تنظیمات `windows_http` روی HTTP هم لاگین می‌شود)
+- تست مستقیم بک‌اند: `http://130.185.73.157:3005/api/v1/health/`
+- پوشه‌ها: برنامه‌های جانبی در `C:\rose-stack`، مخزن کد در `C:\rose-attendance`
 
-```powershell
-# PowerShell با دسترسی Administrator
-cd C:\rose-attendance
-powershell -ExecutionPolicy Bypass -File .\server-inventory.ps1
-```
+---
 
-گزارش `RoseServerReport_*.txt` روی دسکتاپ ساخته می‌شود؛ آن را برای کارشناس استقرار ارسال کنید (به‌ویژه اگر پورت 8080 اشغال است تا پورت جایگزین تعیین شود).
+## ۲) مراحل نصب (به‌ترتیب)
 
-## گام ۲ — نصب پیش‌نیازها (Python 3.12 + Node 22 + PostgreSQL 16 + PostGIS + Redis + Nginx + NSSM)
+همه دستورات را در PowerShell **Run as Administrator** اجرا کنید:
 
 ```powershell
 cd C:\rose-attendance
 git pull
+
+# ۱) پیش‌نیازها (Python/Node/PostgreSQL/PostGIS/Redis/NSSM/Nginx + فایروال 8085 و 3005)
 powershell -ExecutionPolicy Bypass -File .\install-rose-prereq.ps1
+
+# ۲) اپ: دیتابیس + وابستگی‌ها + مهاجرت‌ها + build فرانت‌اند + ادمین
+powershell -ExecutionPolicy Bypass -File .\install-rose-app.ps1 -AdminPassword "رمز-قوی-دلخواه"
+
+# ۳) سرویس‌های ویندوزی (خودکار پس از ری‌بوت)
+powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -InstallServices
+
+# وضعیت
+powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -Status
 ```
 
-این اسکریپت idempotent است (هرچه موجود باشد دوباره نصب نمی‌شود) و همه‌چیز را در `C:\rose-stack` می‌ریزد. چند نکته:
+سپس در مرورگر: `http://130.185.73.157:8085/`
 
-- رمز `postgres` هنگام نصب تصادفی ساخته و در `C:\rose-stack\secrets\pg_postgres_password.txt` ذخیره می‌شود.
-- اگر نصب خودکار **PostGIS** ناموفق بود، StackBuilder را دستی اجرا کنید: منوی استارت → StackBuilder → گزینه PostgreSQL 16 → **Categories → Spatial Extensions → PostGIS for PostgreSQL 16**.
-- قانون فایروال پورت 8080 هم در همین گام باز می‌شود.
-- پس از پایان، خلاصه نصب نمایش داده می‌شود؛ هر قلم `FAILED` را طبق پیام راهنما دستی نصب کنید و دوباره اسکریپت را اجرا کنید.
+---
 
-## گام ۳ — راه‌اندازی اپلیکیشن (دیتابیس + وابستگی‌ها + build + مهاجرت)
+## ۳) تغییرات نسخه ۲ (علت خطاهای قبلی)
+
+| مشکل قبلی | راه‌حل v2 |
+|---|---|
+| `winget` نصب PostgreSQL را ناتمام گذاشت | دانلود مستقیم نصب‌کننده EDB با **BITS** (مقاوم در قطعی شبکه) + fallback «بسته باینری» (بدون نصب‌کننده، با initdb و ثبت سرویس) + تلاش مجدد winget |
+| دانلود NSSM از `nssm.cc` خطای 503 | منبع اول: میرور **GitHub** (`kirillkovalenko/nssm`)؛ سپس nssm.cc |
+| PostGIS ناموجود → خطا | PostGIS حالا **اختیاری** است — برنامه (ENGINE جنگو = postgresql عادی) بدون آن هم کامل کار می‌کند؛ آخرین بسته خودکار از فهرست OSGeo انتخاب می‌شود |
+| پنل ادمین جنگو روی HTTP لاگین نمی‌شد | فایل تنظیمات جدید `backend/config/settings/windows_http.py` (کوکی‌های Secure فقط تا رسیدن SSL خاموش می‌شوند) |
+| پورت‌های 8080/8000 | طبق درخواست: **وب 8085** و **بک‌اند 3005** — فایروال هر دو خودکار باز می‌شود |
+| تداخل Windows Defender | مسیر `C:\rose-stack` به‌عنوان استثنا ثبت می‌شود |
+
+---
+
+## ۴) عیب‌یابی
+
+### لاگ‌ها
+```
+C:\rose-stack\logs\RoseApi.err.log      ← خطاهای بک‌اند
+C:\rose-stack\logs\RoseWorker.err.log   ← خطاهای صف
+C:\rose-stack\logs\RoseNginx.err.log    ← خطاهای وب‌سرور
+C:\rose-stack\logs\RoseRedis.out.log
+```
+
+### PostgreSQL نصب نشد؟
+اسکریپت سه مسیر را امتحان می‌کند (نصب‌کننده EDB → بسته باینری → winget). اگر هر سه شکست خورد:
+1. نصب‌کننده را دستی از `https://www.enterprisedb.com/downloads/postgres-postgresql-downloads` بگیرید (PostgreSQL 16 Windows x64) و نصب کنید (رمز فراموش نشود).
+2. رمز را در `C:\rose-stack\secrets\pg_postgres_password.txt` ذخیره کنید (فقط متن رمز).
+3. دوباره `install-rose-prereq.ps1` و سپس `install-rose-app.ps1` را اجرا کنید.
+
+### nssm.exe ناقص است؟
+فایل `win64\nssm.exe` را از `https://github.com/kirillkovalenko/nssm/releases` بگیرید و در `C:\rose-stack\nssm\nssm.exe` بگذارید.
+
+### سرویسی بالا نیامد؟
+```powershell
+Get-Service Rose*
+C:\rose-stack\nssm\nssm.exe status RoseApi
+type C:\rose-stack\logs\RoseApi.err.log
+# شروع مجدد تک‌سرویس:
+Restart-Service RoseApi
+```
+
+### پورت اشغال است؟
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 8085,3005 | Select LocalPort,OwningProcess
+Get-Process -Id (Get-NetTCPConnection -LocalPort 8085 -State Listen).OwningProcess
+```
+
+### ادمین لاگین نمی‌شود؟
+- بررسی کنید `C:\rose-stack\rose-backend.env` شامل `DJANGO_SETTINGS_MODULE=config.settings.windows_http` باشد.
+- اگر قبلاً مرورگر نسخه HTTPS را دیده، کش کوکی را پاک کنید (Ctrl+Shift+Del).
+- رمز ادمین را دوباره ست کنید:
+```powershell
+$env:PGPASSWORD = (Get-Content C:\rose-stack\secrets\pg_postgres_password.txt -Raw).Trim()
+$env:DJANGO_SETTINGS_MODULE = "config.settings.windows_http"
+$env:DJANGO_SECRET_KEY_FILE = "C:\rose-attendance\secrets\django_secret.txt"
+$env:DB_PASSWORD_FILE = "C:\rose-attendance\secrets\db_password.txt"
+cd C:\rose-attendance\backend
+C:\rose-stack\venv\Scripts\python.exe manage.py changepassword admin
+```
+
+---
+
+## ۵) به‌روزرسانی برنامه (نسخه جدید کد)
 
 ```powershell
 cd C:\rose-attendance
-powershell -ExecutionPolicy Bypass -File .\install-rose-app.ps1 -AdminPassword "یک-رمز-قوی-انتخاب-کنید"
+git pull
+powershell -ExecutionPolicy Bypass -File .\install-rose-app.ps1 -SkipFrontend   # اگر فرانت تغییر نکرده
+# اگر فرانت هم تغییر کرده: بدون -SkipFrontend اجرا کنید
+powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -Restart
 ```
 
-کاری که این اسکریپت می‌کند:
+---
 
-1. ساخت `secrets\django_secret.txt` و `secrets\db_password.txt` (مقادیر تصادفی).
-2. ساخت کاربر `rose_app`، دیتابیس `rose_attendance` و افزونه `postgis` در PostgreSQL.
-3. ساخت venv در `C:\rose-stack\venv` و نصب `backend\requirements.lock` (+ daphne برای WebSocket).
-4. تولید `C:\rose-stack\rose-backend.env` (تنظیمات اتصال، ALLOWED_HOSTS برای `130.185.73.157`، CSRF برای پورت 8080).
-5. اجرای `migrate` و `collectstatic`.
-6. `npm ci` و `npm run build` برای فرانت‌اند (خروجی: `frontend\dist`).
-7. ساخت کاربر مدیر `admin` با رمزی که در پارامتر دادید.
+## ۶) مهاجرت آینده به SSL
 
-> اگر pip یا npm وسط کار خطا داد، همان دستور را دوباره اجرا کنید (idempotent است) و در صورت تکرار، خروجی خطا را برای کارشناس بفرستید.
+بعد از دریافت گواهی معتبر (مثلاً Let's Encrypt با دامنه):
 
-## گام ۴ — اجرا
+1. گواهی (`fullchain.pem`/`privkey.pem` → `fullchain.cer`/`key.key` با فرمت PEM) را در `C:\rose-stack\tls` بگذارید.
+2. در `rose-nginx-windows.conf` یک بلوک `listen 443 ssl;` با `ssl_certificate`/`ssl_certificate_key` اضافه و `listen 8085` را به redirect تبدیل کنید؛ سپس فایل را به `C:\rose-stack\nginx\conf\nginx.conf` کپی و `RoseNginx` را ری‌استارت کنید.
+3. فایروال 443 را باز کنید: `New-NetFirewallRule -DisplayName "Rose HTTPS 443" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow`
+4. در `C:\rose-stack\rose-backend.env` مقدار `DJANGO_SETTINGS_MODULE` را به `config.settings.production` برگردانید و `DJANGO_CSRF_TRUSTED_ORIGINS` را به `https://دامنه-شما` تغییر دهید؛ سپس `Restart-Service RoseApi`.
+5. تمدید خودکار گواهی (Win-ACME) را هم می‌توان بعداً اضافه کرد — در صورت نیاز، کیت مربوطه تهیه می‌شود.
 
-**حالت سرویس ویندوزی (توصیه‌شده — پس از ریبوت خودکار بالا می‌آید):**
+---
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -InstallServices
-```
+## ۷) نکات امنیتی
 
-**حالت کنسول موقت (برای تست سریع، لاگ جلوی چشم):**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -Console
-```
-
-سایر دستورات: `-Status` (وضعیت سرویس‌ها و پورت‌ها)، `-Stop`، `-Start`، `-Restart`، `-UninstallServices`.
-
-## گام ۵ — تست
-
-| بررسی | آدرس/دستور | نتیجه مورد انتظار |
-|---|---|---|
-| سلامت API | `curl http://130.185.73.157:8080/api/v1/health/` | JSON سالم |
-| PWA | `http://130.185.73.157:8080/` در مرورگر | صفحه ورود |
-| وضعیت سرویس‌ها | `.\run-rose.ps1 -Status` | همه Running، پورت‌های 8000/8080/6379/5432 گوش می‌دهند |
-| لاگ‌ها | `C:\rose-stack\logs\*.log` | بدون خطای قرمز |
-
-> **نکته مهم:** در حالت HTTP، PWA پرسنل (JWT) و API و WebSocket کامل کار می‌کنند، اما **لاگین پنل ادمین جنگو** (`/admin`) به‌دلیل کوکی `Secure` تنظیمات production روی HTTP انجام نمی‌شود — پس از گرفتن SSL خودبه‌خود رفع می‌شود. مدیریت داده‌ها در این فاصله از طریق PWA (پنل HR/ADMIN) انجام می‌شود.
-
-## عیب‌یابی رایج
-
-- **پورت 8080 اشغال است** → در `C:\rose-stack\nginx\conf\nginx.conf` مقدار `listen 8080` را تغییر دهید، `run-rose.ps1 -Restart` بزنید و `DJANGO_CSRF_TRUSTED_ORIGINS` در `C:\rose-stack\rose-backend.env` را همگام کنید.
-- **RoseApi استارت نمی‌شود** → `C:\rose-stack\logs\RoseApi.err.log` را ببینید؛ رایج‌ترین علت: PostgreSQL/Redis بالا نیست یا `rose-backend.env` ناقص است.
-- **خطای GIS/GDAL در migrate** → مطمئن شوید PostGIS از طریق StackBuilder نصب شده و مسیر `C:\Program Files\PostgreSQL\16\bin` در PATH سیستم است؛ سپس سرور را ری‌استارت کنید.
-- **WebSocket وصل نمی‌شود** → daphne باید نصب باشد (`C:\rose-stack\venv\Scripts\python.exe -m pip show daphne`)؛ اگر نیست نصبش کنید و `run-rose.ps1 -Restart` بزنید.
-- **از بیرون باز نمی‌شود ولی روی خود سرور باز است** → قانون فایروال 8080 و DNAT روتر/فایروال سازمانی را بررسی کنید.
-- **پس از تغییر rose-backend.env** → `run-rose.ps1 -Restart` الزامی است.
-
-## مهاجرت بعدی به SSL (پس از پایان توسعه)
-
-1. دامنه را به IP سرور متصل کنید و گواهی بگیرید (Let's Encrypt یا سازمانی).
-2. در `C:\rose-stack\nginx\conf\nginx.conf` بلاک HTTPS با `ssl_certificate` اضافه و ۸۰ را به ۴۴۳ ریدایرکت کنید؛ قانون فایروال 443 را باز کنید.
-3. در `C:\rose-stack\rose-backend.env` مقدار `DJANGO_CSRF_TRUSTED_ORIGINS=https://your-domain` و ALLOWED_HOSTS به دامنه.
-4. `run-rose.ps1 -Restart`.
-
-## بهره‌برداری
-
-- بکاپ دیتابیس: `"C:\Program Files\PostgreSQL\16\bin\pg_dump.exe" -h 127.0.0.1 -U rose_app -d rose_attendance -F c -f C:\rose-backups\rose-%DATE%.dump`
-- لاگ‌ها با چرخش خودکار در `C:\rose-stack\logs\` (هر ۱۰MB).
-- سرویس‌ها روی `SERVICE_AUTO_START` هستند؛ پس از ریبوت سرور به‌صورت خودکار بالا می‌آیند.
-- `secrets\`، `rose-backend.env` و گواهی‌ها هرگز commit/push نشوند.
-
-</div>
+- Redis و PostgreSQL فقط روی `127.0.0.1` گوش می‌دهند و از اینترنت قابل دسترسی نیستند.
+- پورت 3005 (بک‌اند مستقیم) در فایروال باز است برای تست؛ پس از راه‌اندازی می‌توانید ببندید:
+  `Remove-NetFirewallRule -DisplayName "Rose Attendance API 3005"`
+- رمزهای تصادفی: `C:\rose-stack\secrets\pg_postgres_password.txt` (postgres)، `C:\rose-attendance\secrets\` (جنگو/دیتابیس). پوشه secrets هرگز نباید commit یا عمومی شود.
+- توکن GitHub که در گفتگو استفاده شد، پس از پایان استقرار باید **revoke** شود.
