@@ -109,6 +109,16 @@ def punch_response(event: AttendanceEvent, created: bool) -> dict:
     }
 
 
+def no_employee_response():
+    """حساب بدون پروندهٔ پرسنلی — پاس شفاف به‌جای خطای ۵۰۰ (مثل messaging)."""
+    return Response(
+        {
+            "detail": "حساب شما به پروندهٔ پرسنلی متصل نیست؛ از مدیر بخواهید از بخش «مدیریت پرسنل» پروندهٔ شما را بسازد یا متصل کند.", "code": "NO_EMPLOYEE_PROFILE",
+        },
+        status=403,
+    )
+
+
 class AttendanceEventViewSet(
     mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
 ):
@@ -128,6 +138,8 @@ class AttendanceEventViewSet(
 
     @action(detail=False, methods=["post"], url_name="punch", url_path="punch")
     def create_punch(self, request):
+        if not request.user.employee_id:
+            return no_employee_response()
         ser = OnlinePunchSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         event, created = receive_punch(employee=request.user.employee, **ser._validated_punch())
@@ -135,6 +147,8 @@ class AttendanceEventViewSet(
 
     @action(detail=False, methods=["post"], url_name="sync", url_path="sync")
     def sync_batch(self, request):
+        if not request.user.employee_id:
+            return no_employee_response()
         ser = SyncBatchSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         results = []
@@ -157,6 +171,8 @@ class AttendanceEventViewSet(
         user: User = self.request.user
         qs = AttendanceEvent.objects.select_related("branch")
         if self.action in ("list", "retrieve"):
+            if not user.employee_id:
+                return qs.none()
             return qs.filter(employee=user.employee)
         return qs
 
@@ -185,6 +201,8 @@ class AttendanceSessionViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if not self.request.user.employee_id:
+            return AttendanceSession.objects.none()
         return (
             AttendanceSession.objects.filter(employee=self.request.user.employee)
             .select_related("check_in_event", "check_out_event", "branch")
@@ -419,12 +437,16 @@ class DailyBoardViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                  "code": "INVALID_WINDOW"},
                 status=400,
             )
+        if not request.user.employee_id:
+            return no_employee_response()
         rows = self._rows(request.user.employee, *window)
         return Response({"count": len(rows), "results": rows})
 
     @action(detail=False, methods=["get"], url_name="today", url_path="today")
     def today(self, request):
         """Punch-page card: today's day row + today's events + open session."""
+        if not request.user.employee_id:
+            return no_employee_response()
         employee = request.user.employee
         today = timezone.localdate()
         jy, jm = current_jalali_period()
@@ -492,8 +514,10 @@ class OvertimeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                 user.role_assignments.filter(role__code="BRANCH_MANAGER").values_list("branch_id", flat=True)
             )
             qs = OvertimeProposal.objects.filter(branch_id__in=branch_ids)
-        else:
+        elif user.employee_id:
             qs = OvertimeProposal.objects.filter(employee=user.employee)
+        else:
+            qs = OvertimeProposal.objects.none()
         return qs.select_related("employee", "branch", "session")
 
     def list(self, request, *args, **kwargs):

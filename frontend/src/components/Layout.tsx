@@ -63,6 +63,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     ...(isHrAdmin ? [{ to: '/org', label: 'سازمان', icon: '🏢' } satisfies Tab] : []),
     ...(isHrAdmin ? [{ to: '/import', label: 'ورود گروهی', icon: '📥' } satisfies Tab] : []),
     ...(isHrAdmin ? [{ to: '/reports', label: 'گزارش‌ها', icon: '📑' } satisfies Tab] : []),
+    ...(isHrAdmin ? [{ to: '/management', label: 'مدیریت', icon: '👥' } satisfies Tab] : []),
     { to: '/settings', label: 'تنظیمات', icon: '⚙️' },
   ]
   return (

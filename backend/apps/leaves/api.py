@@ -147,6 +147,11 @@ class RequestsViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     def list(self, request, *args, **kwargs):
+        if not request.user.employee_id:
+            return Response(
+                {"detail": "حساب شما به پروندهٔ پرسنلی متصل نیست؛ از مدیر بخواهید از بخش «مدیریت پرسنل» پروندهٔ شما را بسازد یا متصل کند.", "code": "NO_EMPLOYEE_PROFILE"},
+                status=403,
+            )
         employee = request.user.employee
         leaves = (
             LeaveRequest.objects.filter(employee=employee)
@@ -165,6 +170,11 @@ class RequestsViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     @action(detail=False, methods=["post"], url_path="leave")
     def submit_leave_request(self, request):
+        if not request.user.employee_id:
+            return Response(
+                {"detail": "حساب شما به پروندهٔ پرسنلی متصل نیست؛ از مدیر بخواهید از بخش «مدیریت پرسنل» پروندهٔ شما را بسازد یا متصل کند.", "code": "NO_EMPLOYEE_PROFILE"},
+                status=403,
+            )
         ser = LeaveSubmitSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
@@ -182,6 +192,11 @@ class RequestsViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     @action(detail=False, methods=["post"], url_path="mission")
     def submit_mission_request(self, request):
+        if not request.user.employee_id:
+            return Response(
+                {"detail": "حساب شما به پروندهٔ پرسنلی متصل نیست؛ از مدیر بخواهید از بخش «مدیریت پرسنل» پروندهٔ شما را بسازد یا متصل کند.", "code": "NO_EMPLOYEE_PROFILE"},
+                status=403,
+            )
         ser = MissionSubmitSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         data = ser.validated_data

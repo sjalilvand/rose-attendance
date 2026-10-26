@@ -67,6 +67,9 @@ export default function LoginPage() {
         <p className="hint">
           با پنج تلاش ناموفق، حساب به مدت ۱۵ دقیقه قفل می‌شود (بخش ۶ سند).
         </p>
+        <p className="hint install-hint">
+          <a className="linklike" href="/install">📱 نصب نسخهٔ موبایل (QR)</a>
+        </p>
       </form>
     </div>
   )

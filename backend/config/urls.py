@@ -19,6 +19,15 @@ from apps.leaves.api import (
     RequestsViewSet,
 )
 from apps.orgs.api import BranchViewSet, RegionViewSet
+from apps.people.management_api import (
+    ManagementPersonnelCreateUserView,
+    ManagementPersonnelDetail,
+    ManagementPersonnelListCreate,
+    ManagementSeedDemoView,
+    ManagementUserDetail,
+    ManagementUserSetPassword,
+    ManagementUsersList,
+)
 from apps.people.api import (
     MeView,
     PersonnelImportTemplateView,
@@ -76,6 +85,14 @@ api_v1 = [
     path("leaves/ledger/template/", LedgerTemplateView.as_view(), name="leave-ledger-template"),
     path("leaves/ledger/import/", LedgerImportView.as_view(), name="leave-ledger-import"),
     path("health/", HealthView.as_view(), name="health"),
+    # مدیریت پرسنل و کاربران خارج از پنل ادمین (فقط HR/ADMIN/superuser)
+    path("management/personnel/", ManagementPersonnelListCreate.as_view(), name="mgmt-personnel"),
+    path("management/personnel/<int:employee_id>/", ManagementPersonnelDetail.as_view(), name="mgmt-personnel-detail"),
+    path("management/personnel/<int:employee_id>/create-user/", ManagementPersonnelCreateUserView.as_view(), name="mgmt-personnel-create-user"),
+    path("management/users/", ManagementUsersList.as_view(), name="mgmt-users"),
+    path("management/users/<int:user_id>/", ManagementUserDetail.as_view(), name="mgmt-user-detail"),
+    path("management/users/<int:user_id>/set-password/", ManagementUserSetPassword.as_view(), name="mgmt-user-password"),
+    path("management/seed-demo/", ManagementSeedDemoView.as_view(), name="mgmt-seed-demo"),
 ]
 
 urlpatterns = [

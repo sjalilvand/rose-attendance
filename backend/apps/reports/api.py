@@ -129,8 +129,10 @@ class MonthlySummaryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
         user = self.request.user
         if user.is_superuser or user.has_role("HR") or user.has_role("ADMIN"):
             qs = MonthlySummary.objects.all()
-        else:
+        elif user.employee_id:
             qs = MonthlySummary.objects.filter(employee=user.employee)
+        else:
+            qs = MonthlySummary.objects.none()
         return qs.select_related("branch", "employee")
 
     def list(self, request, *args, **kwargs):

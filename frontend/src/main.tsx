@@ -16,6 +16,8 @@ import MessagesPage from './pages/MessagesPage'
 import NotificationsPage from './pages/NotificationsPage'
 import ReportsPage from './pages/ReportsPage'
 import SettingsPage from './pages/SettingsPage'
+import InstallPage from './pages/InstallPage'
+import ManagementPage from './pages/ManagementPage'
 import './styles.css'
 
 registerSW({ immediate: true })
@@ -31,6 +33,13 @@ function PublicOnly({ children }: { children: JSX.Element }) {
   const { ready, me } = useAuth()
   if (!ready) return <div className="page-loading">در حال بارگذاری…</div>
   if (me) return <Navigate to="/" replace />
+  return children
+}
+
+function RequireStaff({ children }: { children: JSX.Element }) {
+  const { me } = useAuth()
+  const allowed = Boolean(me && me.roles.some((r) => r === 'HR' || r === 'ADMIN'))
+  if (!allowed) return <Navigate to="/" replace />
   return children
 }
 
@@ -130,6 +139,17 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <SettingsPage />
+          </RequireAuth>
+        }
+      />
+      <Route path="/install" element={<InstallPage />} />
+      <Route
+        path="/management"
+        element={
+          <RequireAuth>
+            <RequireStaff>
+              <ManagementPage />
+            </RequireStaff>
           </RequireAuth>
         }
       />

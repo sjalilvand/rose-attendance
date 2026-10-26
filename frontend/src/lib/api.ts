@@ -934,3 +934,119 @@ export function fetchUnreadBadge(): Promise<UnreadBadge> {
 export function pokeBadge(): void {
   window.dispatchEvent(new Event('rose:refresh-badge'))
 }
+
+
+// ---------------------------------------------------------------------------
+// مدیریت پرسنل و کاربران (خارج از پنل ادمین) — فقط HR/ADMIN/superuser
+// ---------------------------------------------------------------------------
+export interface MgmtUserRef {
+  id: number
+  username: string
+  is_active: boolean
+  is_staff: boolean
+  last_login: string | null
+}
+
+export interface MgmtPersonnelRow {
+  id: number
+  personnel_code: string
+  first_name: string
+  last_name: string
+  full_name: string
+  mobile: string
+  national_id: string
+  job_title: string
+  employment_status: string
+  hired_on: string | null
+  home_branch_id: number
+  home_branch_code: string
+  home_branch_name: string
+  user: MgmtUserRef | null
+}
+
+export interface MgmtUserRow {
+  id: number
+  username: string
+  is_active: boolean
+  is_staff: boolean
+  is_superuser: boolean
+  last_login: string | null
+  failed_attempts: number
+  is_locked: boolean
+  employee: { id: number; personnel_code: string; full_name: string } | null
+}
+
+export interface SeedDemoReport {
+  created: number
+  skipped: number
+  password: string
+  branch: { code: string; name: string }
+  first_username: string | null
+  last_username: string | null
+  note: string
+}
+
+export interface MgmtPersonnelPayload {
+  personnel_code: string
+  first_name: string
+  last_name: string
+  mobile?: string
+  national_id?: string
+  job_title?: string
+  employment_status?: string
+  hired_on?: string | null
+  home_branch_id?: number | null
+  username?: string
+  password?: string
+  is_staff?: boolean
+}
+
+export function fetchMgmtPersonnel(q: string): Promise<{ count: number; results: MgmtPersonnelRow[] }> {
+  return apiFetch(`/management/personnel/?q=${encodeURIComponent(q)}`)
+}
+
+export function createMgmtPersonnel(payload: MgmtPersonnelPayload): Promise<MgmtPersonnelRow> {
+  return apiFetch('/management/personnel/', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function updateMgmtPersonnel(
+  id: number,
+  payload: Partial<MgmtPersonnelPayload> & { user_id?: number | null },
+): Promise<MgmtPersonnelRow> {
+  return apiFetch(`/management/personnel/${id}/`, { method: 'PATCH', body: JSON.stringify(payload) })
+}
+
+export function createPersonnelUser(
+  id: number,
+  payload: { username: string; password: string; is_staff?: boolean },
+): Promise<MgmtUserRef> {
+  return apiFetch(`/management/personnel/${id}/create-user/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function fetchMgmtUsers(q: string): Promise<{ count: number; results: MgmtUserRow[] }> {
+  return apiFetch(`/management/users/?q=${encodeURIComponent(q)}`)
+}
+
+export function updateMgmtUser(
+  id: number,
+  payload: { is_active?: boolean; is_staff?: boolean; username?: string },
+): Promise<MgmtUserRow> {
+  return apiFetch(`/management/users/${id}/`, { method: 'PATCH', body: JSON.stringify(payload) })
+}
+
+export function setMgmtUserPassword(id: number, password: string): Promise<{ detail: string }> {
+  return apiFetch(`/management/users/${id}/set-password/`, {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  })
+}
+
+export function seedDemoPersonnel(count: number, password: string): Promise<SeedDemoReport> {
+  return apiFetch('/management/seed-demo/', {
+    method: 'POST',
+    body: JSON.stringify({ count, password }),
+  })
+}
