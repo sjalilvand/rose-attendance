@@ -45,7 +45,7 @@ $RoseWebPort = 8085
 $RoseApiPort = 3005
 
 Write-Host ''
-Write-Host '== راه‌اندازی اپلیکیشن رز سفید (بدون Docker) — نسخه ۲ ==' -ForegroundColor Cyan
+Write-Host '== راه‌اندازی اپلیکیشن رز سفید (بدون Docker) — نسخه ۳ ==' -ForegroundColor Cyan
 Write-Host ("   مخزن   : " + $RepoRoot)
 Write-Host ("   پورت‌ها : وب $RoseWebPort / بک‌اند $RoseApiPort")
 

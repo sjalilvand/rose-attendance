@@ -135,7 +135,7 @@ function Find-PostGisControl([string]$psqlPath) {
 
 Refresh-Path
 Write-Host ''
-Write-Host '== نصب پیش‌نیازهای رز سفید (بدون Docker) — نسخه ۲ ==' -ForegroundColor Cyan
+Write-Host '== نصب پیش‌نیازهای رز سفید (بدون Docker) — نسخه ۳ ==' -ForegroundColor Cyan
 Write-Host ("   پورت‌ها: وب $RoseWebPort / بک‌اند $RoseApiPort") -ForegroundColor DarkCyan
 
 # ---------------------------------------------------------------- Python -----
