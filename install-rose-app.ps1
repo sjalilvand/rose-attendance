@@ -2,13 +2,19 @@
 <#
 .SYNOPSIS
   راه‌اندازی اپلیکیشن «رز سفید» بدون Docker: دیتابیس، وابستگی‌های بک‌اند،
-  build فرانت‌اند، مهاجرت‌ها و فایل‌های env.
+  build فرانت‌اند، مهاجرت‌ها و فایل‌های env (نسخه ۲).
+
+.CHANGES v2
+  - پورت‌های جدید: وب 8085، بک‌اند 3005
+  - تنظیمات windows_http: پنل ادمین جنگو روی HTTP هم کار می‌کند (تا رسیدن SSL)
+  - ساخت افزونه PostGIS اختیاری شد (شکستش نصب را متوقف نمی‌کند)
+  - کشف مسیر psql/python از C:\rose-stack\stack-env.ps1
 
 .DESCRIPTION
   پیش‌نیاز: install-rose-prereq.ps1 اجرا شده باشد و مخزن در C:\rose-attendance باشد.
   این اسکریپت:
     ۱) secrets تصادفی می‌سازد (django_secret / db_password)
-    ۲) در PostgreSQL دیتابیس rose_attendance و کاربر rose_app + افزونه PostGIS می‌سازد
+    ۲) در PostgreSQL دیتابیس rose_attendance و کاربر rose_app می‌سازد (+PostGIS در صورت وجود)
     ۳) venv پایتون می‌سازد و requirements.lock (+ daphne برای WebSocket) را نصب می‌کند
     ۴) فایل env یکپارچه C:\rose-stack\rose-backend.env را تولید می‌کند
     ۵) migrate و collectstatic اجرا می‌کند
@@ -35,23 +41,46 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $PSScriptRoot }
 $stack = 'C:\rose-stack'
 $backend = Join-Path $RepoRoot 'backend'
 $frontend = Join-Path $RepoRoot 'frontend'
+$RoseWebPort = 8085
+$RoseApiPort = 3005
 
 Write-Host ''
-Write-Host '== راه‌اندازی اپلیکیشن رز سفید (بدون Docker) ==' -ForegroundColor Cyan
+Write-Host '== راه‌اندازی اپلیکیشن رز سفید (بدون Docker) — نسخه ۲ ==' -ForegroundColor Cyan
 Write-Host ("   مخزن   : " + $RepoRoot)
+Write-Host ("   پورت‌ها : وب $RoseWebPort / بک‌اند $RoseApiPort")
 
 # ------------------------------------------------- ۰) پیش‌نیازها -------------
 if (-not (Test-Path $backend) -or -not (Test-Path $frontend)) {
   Write-Error "این اسکریپت باید داخل ریشه مخزن (C:\rose-attendance) اجرا شود. مسیر فعلی: $RepoRoot"
   exit 1
 }
-$psql = @('C:\Program Files\PostgreSQL\16\bin\psql.exe',
-          'C:\Program Files\PostgreSQL\17\bin\psql.exe') |
-        Where-Object { Test-Path $_ } | Select-Object -First 1
+
+# stack-env از اسکریپت پیش‌نیاز (اگر باشد)
+$RosePsqlFromStack = $null
+$RosePythonFromStack = $null
+if (Test-Path "$stack\stack-env.ps1") {
+  . "$stack\stack-env.ps1"
+  $RosePsqlFromStack = $RosePsql
+  $RosePythonFromStack = $RosePython
+}
+
+$psql = @("$RosePsqlFromStack",
+          'C:\Program Files\PostgreSQL\16\bin\psql.exe') |
+        Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $psql) {
+  try {
+    $reg = Get-ItemProperty 'HKLM:\SOFTWARE\PostgreSQL\Installations\postgresql-x64-16' -ErrorAction SilentlyContinue
+    if ($reg -and $reg.'Base Directory') {
+      $cand = Join-Path $reg.'Base Directory' 'bin\psql.exe'
+      if (Test-Path $cand) { $psql = $cand }
+    }
+  } catch { }
+}
 if (-not $psql) {
   $svc = Get-CimInstance Win32_Service -Filter "Name LIKE 'postgresql%'" -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($svc -and $svc.PathName) {
-    $exe = ($svc.PathName -replace '^"([^"]+)"\s.*$', '$1')
+    $exe = $null
+    if ($svc.PathName -match '^"([^"]+)"') { $exe = $Matches[1] } else { $exe = ($svc.PathName -split ' ')[0] }
     $candidate = Join-Path (Split-Path (Split-Path $exe -Parent) -Parent) 'bin\psql.exe'
     if (Test-Path $candidate) { $psql = $candidate }
   }
@@ -62,7 +91,7 @@ Write-Host ("   psql   : " + $psql)
 # ------------------------------------------------- ۱) secrets ----------------
 Write-Host '-- ۱/۷ آماده‌سازی secrets --' -ForegroundColor Yellow
 $secretsDir = Join-Path $RepoRoot 'secrets'
-New-Item -ItemType Directory -Force -Path $secretsDir, (Join-Path $RepoRoot 'deploy\tls') | Out-Null
+New-Item -ItemType Directory -Force -Path $secretsDir | Out-Null
 foreach ($name in @('django_secret', 'db_password')) {
   $file = Join-Path $secretsDir ($name + '.txt')
   if (-not (Test-Path $file)) {
@@ -97,13 +126,13 @@ function Invoke-Psql([string]$sql) {
 if ($LASTEXITCODE -ne 0) { Write-Error 'اتصال به PostgreSQL با کاربر postgres ناموفق بود (رمز را بررسی کنید).'; exit 1 }
 Write-Host '   اتصال PostgreSQL برقرار است.'
 
-# کاربر rose_app
+# کاربر rose_app (SUPERUSER تا مهاجرت‌ها و افزونه‌ها بدون مشکل ساخته شوند)
 $roleExists = & $psql -tA -h 127.0.0.1 -p 5432 -U postgres -c "SELECT 1 FROM pg_roles WHERE rolname='rose_app';"
 if ("$roleExists".Trim() -ne '1') {
-  Invoke-Psql "CREATE ROLE rose_app LOGIN PASSWORD '$dbPassword';"
+  Invoke-Psql "CREATE ROLE rose_app LOGIN SUPERUSER PASSWORD '$dbPassword';"
   Write-Host '   کاربر rose_app ساخته شد.'
 } else {
-  Invoke-Psql "ALTER ROLE rose_app WITH LOGIN PASSWORD '$dbPassword';"
+  Invoke-Psql "ALTER ROLE rose_app WITH LOGIN SUPERUSER PASSWORD '$dbPassword';"
   Write-Host '   کاربر rose_app موجود است (رمز همگام شد).'
 }
 
@@ -116,26 +145,29 @@ if ("$dbExists".Trim() -ne '1') {
   Write-Host '   دیتابیس rose_attendance موجود است.'
 }
 
-# افزونه PostGIS داخل دیتابیس
-Invoke-Psql "CREATE EXTENSION IF NOT EXISTS postgis;"
-Write-Host '   افزونه PostGIS فعال است.'
+# افزونه PostGIS — اختیاری (برنامه بدون آن هم کار می‌کند)
+try {
+  Invoke-Psql "CREATE EXTENSION IF NOT EXISTS postgis;"
+  Write-Host '   افزونه PostGIS فعال است.'
+} catch {
+  Write-Warning 'افزونه PostGIS فعال نشد — اشکالی ندارد، برنامه بدون آن کار می‌کند.'
+}
 
 # ------------------------------------------------- ۳) فایل env ---------------
 Write-Host '-- ۳/۷ تولید فایل env یکپارچه --' -ForegroundColor Yellow
 $envMap = [ordered]@{
-  'DJANGO_SETTINGS_MODULE'   = 'config.settings.production'
-  'DJANGO_SECRET_KEY_FILE'   = (Join-Path $secretsDir 'django_secret.txt')
-  'DB_PASSWORD_FILE'         = (Join-Path $secretsDir 'db_password.txt')
-  'DB_HOST'                  = '127.0.0.1'
-  'DB_PORT'                  = '5432'
-  'DB_NAME'                  = 'rose_attendance'
-  'DB_USER'                  = 'rose_app'
-  'REDIS_URL'                = 'redis://127.0.0.1:6379/0'
-  'CHANNEL_REDIS_URL'        = 'redis://127.0.0.1:6379/1'
-  'DJANGO_ALLOWED_HOSTS'     = '130.185.73.157,localhost,127.0.0.1'
-  'DJANGO_CSRF_TRUSTED_ORIGINS' = 'http://130.185.73.157:8080,http://localhost'
-  'DJANGO_DEBUG'             = 'False'
-  'BUSINESS_TIME_ZONE'       = 'Asia/Tehran'
+  'DJANGO_SETTINGS_MODULE'      = 'config.settings.windows_http'
+  'DJANGO_SECRET_KEY_FILE'      = (Join-Path $secretsDir 'django_secret.txt')
+  'DB_PASSWORD_FILE'            = (Join-Path $secretsDir 'db_password.txt')
+  'DB_HOST'                     = '127.0.0.1'
+  'DB_PORT'                     = '5432'
+  'DB_NAME'                     = 'rose_attendance'
+  'DB_USER'                     = 'rose_app'
+  'REDIS_URL'                   = 'redis://127.0.0.1:6379/0'
+  'CHANNEL_REDIS_URL'           = 'redis://127.0.0.1:6379/1'
+  'DJANGO_ALLOWED_HOSTS'        = '130.185.73.157,localhost,127.0.0.1'
+  'DJANGO_CSRF_TRUSTED_ORIGINS' = "http://130.185.73.157:$RoseWebPort,http://localhost:$RoseWebPort"
+  'DJANGO_DEBUG'                = 'False'
 }
 $envPath = "$stack\rose-backend.env"
 $lines = foreach ($k in $envMap.Keys) { "$k=$($envMap[$k])" }
@@ -151,12 +183,14 @@ foreach ($k in $envMap.Keys) { Set-Item -Path ("env:" + $k) -Value $envMap[$k] }
 Write-Host '-- ۴/۷ ساخت venv و نصب وابستگی‌های بک‌اند (چند دقیقه) --' -ForegroundColor Yellow
 $venvPy = "$stack\venv\Scripts\python.exe"
 if (-not (Test-Path $venvPy)) {
-  $py = $null
-  foreach ($c in @('python', 'py')) {
-    $cmd = Get-Command $c -ErrorAction SilentlyContinue
-    if ($cmd) {
-      $v = (& $cmd.Source --version 2>&1) | Out-String
-      if ($v -match 'Python\s+3\.(12|13)') { $py = $cmd.Source; break }
+  $py = $RosePythonFromStack
+  if (-not $py -or -not (Test-Path $py)) {
+    foreach ($c in @('python', 'py')) {
+      $cmd = Get-Command $c -ErrorAction SilentlyContinue
+      if ($cmd) {
+        $v = (& $cmd.Source --version 2>&1) | Out-String
+        if ($v -match 'Python\s+3\.(12|13)') { $py = $cmd.Source; break }
+      }
     }
   }
   if (-not $py) { Write-Error 'Python 3.12/3.13 یافت نشد — ابتدا install-rose-prereq.ps1 را اجرا کنید.'; exit 1 }
@@ -187,7 +221,7 @@ Write-Host '   وابستگی‌های بک‌اند نصب شد.' -ForegroundCo
 Write-Host '-- ۵/۷ مهاجرت دیتابیس و جمع‌آوری فایل‌های static --' -ForegroundColor Yellow
 Push-Location $backend
 & $venvPy manage.py migrate --noinput
-if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'migrate ناموفق بود (PostGIS/دیتابیس را بررسی کنید).'; exit 1 }
+if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'migrate ناموفق بود (اتصال دیتابیس را بررسی کنید).'; exit 1 }
 & $venvPy manage.py collectstatic --noinput
 if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error 'collectstatic ناموفق بود.'; exit 1 }
 Pop-Location
@@ -232,5 +266,6 @@ Write-Host 'راه‌اندازی اپلیکیشن کامل شد ✓' -Foregroun
 Write-Host ''
 Write-Host 'گام بعدی — اجرای همه سرویس‌ها:' -ForegroundColor Cyan
 Write-Host '  powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -InstallServices'
-Write-Host 'سپس مرورگر:  http://130.185.73.157:8080/'
-Write-Host 'سلامت API :  http://130.185.73.157:8080/api/v1/health/'
+Write-Host "سپس مرورگر:  http://130.185.73.157:$RoseWebPort/"
+Write-Host "پنل ادمین :  http://130.185.73.157:$RoseWebPort/admin/"
+Write-Host "سلامت API :  http://130.185.73.157:$RoseWebPort/api/v1/health/"
