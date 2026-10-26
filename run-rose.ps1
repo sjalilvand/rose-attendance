@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  مدیریت اجرای سامانه رز سفید بدون Docker — نسخه ۳.۵ (WinSW / NSSM).
+  مدیریت اجرای سامانه رز سفید بدون Docker — نسخه ۳.۷ (WinSW / NSSM).
 
 .DESCRIPTION
   پورت‌ها: بک‌اند 3005 و وب 8085.
@@ -94,8 +94,34 @@ $services = @(
   @{ Name='RoseApi';    App=$venvPy; Args="-m daphne -b 0.0.0.0 -p $RoseApiPort config.asgi:application"; Dir=$backend; Deps=@('RoseRedis'); StopExe=''; StopArgs='' },
   @{ Name='RoseWorker'; App=$venvPy; Args='-m celery -A config worker --pool=solo --loglevel=INFO --without-gossip --without-mingle'; Dir=$backend; Deps=@('RoseRedis'); StopExe=''; StopArgs='' },
   @{ Name='RoseBeat';   App=$venvPy; Args="-m celery -A config beat --loglevel=INFO --schedule=$stack\celerybeat-schedule"; Dir=$backend; Deps=@('RoseRedis'); StopExe=''; StopArgs='' },
-  @{ Name='RoseNginx';  App="$stack\nginx\nginx.exe"; Args=''; Dir="$stack\nginx"; Deps=@(); StopExe="$stack\nginx\nginx.exe"; StopArgs='-s quit' }
+  @{ Name='RoseNginx';  App="$stack\nginx\nginx.exe"; Args=''; Dir="$stack\nginx"; Deps=@(); StopExe="$stack\nginx\nginx.exe"; StopArgs='-s stop' }
 )
+
+function Stop-RoseServiceSafe {
+  # توقف زمان‌دار سرویس؛ اگر توقف عادی پاس نشد، درخت پروسه به‌اجبار بسته می‌شود.
+  # (Stop-Service در PS 5.1 بلوکه‌شونده است و روی nginx با اتصال‌های باز گیر می‌کند)
+  param([string]$Name, [int]$TimeoutSec = 25)
+  $svc = Get-Service $Name -ErrorAction SilentlyContinue
+  if (-not $svc -or $svc.Status -eq 'Stopped') { return }
+  if ($Name -eq 'RoseNginx') {
+    try {
+      $ngx = Join-Path $stack 'nginx\nginx.exe'
+      if (Test-Path $ngx) { & $ngx -p "$stack\nginx" -s stop 2>$null | Out-Null }
+    } catch { }
+    Start-Sleep -Seconds 1
+  }
+  & sc.exe stop $Name | Out-Null
+  try { $svc.WaitForStatus('Stopped', (New-TimeSpan -Seconds $TimeoutSec)) }
+  catch {
+    Write-Warning ("توقف عادی " + $Name + " پاس نشد — توقف اجباری پروسه‌ها")
+    $wp = Get-Process $Name -ErrorAction SilentlyContinue
+    if ($wp) { & taskkill.exe /PID $wp.Id /T /F 2>$null | Out-Null }
+    if ($Name -eq 'RoseNginx') {
+      Get-Process nginx -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$stack\nginx*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+    try { $svc.WaitForStatus('Stopped', (New-TimeSpan -Seconds 10)) } catch { }
+  }
+}
 
 function Find-ExternalPgService {
   # سرویس PostgreSQL «خارجی» (غیر از سرویس‌های خودمان) را پیدا می‌کند.
@@ -202,6 +228,8 @@ function Install-Winsw($svc) {
     '  <workingdirectory>' + (Escape-Xml $svc.Dir) + "</workingdirectory>`r`n" +
     "  <startmode>Automatic</startmode>`r`n" +
     $stopXml +
+    "  <stoptimeout>20 Sec</stoptimeout>`r`n" +
+    "  <stopparentprocessfirst>true</stopparentprocessfirst>`r`n" +
     '  <logpath>' + (Escape-Xml "$stack\logs") + "</logpath>`r`n" +
     '  <log mode="roll-by-size">' + "`r`n" +
     "    <sizeThreshold>10485760</sizeThreshold>`r`n" +
@@ -228,6 +256,16 @@ function Install-Winsw($svc) {
       if (-not $st -or $st.Status -eq 'Stopped') { break }
       Start-Sleep -Seconds 1
       $waited++
+    }
+    $stAfter = (Get-Service $svc.Name -ErrorAction SilentlyContinue)
+    if ($stAfter -and $stAfter.Status -ne 'Stopped') {
+      Write-Warning ("     توقف " + $svc.Name + " طول کشید — توقف اجباری درخت پروسه")
+      $wp = Get-Process $svc.Name -ErrorAction SilentlyContinue
+      if ($wp) { & taskkill.exe /PID $wp.Id /T /F 2>$null | Out-Null }
+      if ($svc.Name -eq 'RoseNginx') {
+        Get-Process nginx -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$stack\nginx*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+      }
+      Start-Sleep -Seconds 2
     }
     Start-Sleep -Seconds 1
     & $exe uninstall | Out-Null
@@ -453,6 +491,13 @@ if ($InstallServices) {
   elseif ($script:ExternalPgService -and (Get-Service $script:ExternalPgService -ErrorAction SilentlyContinue)) { $startOrder += $script:ExternalPgService }
   $startOrder += @('RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')
   foreach ($name in $startOrder) {
+    if ($name -eq 'RoseNginx') {
+      $ns = Get-Service RoseNginx -ErrorAction SilentlyContinue
+      if (-not $ns -or $ns.Status -ne 'Running') {
+        Get-Process nginx -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$stack\nginx*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+      }
+    }
     try { Start-Service $name -ErrorAction Stop; Write-Host ("   شروع شد: " + $name) -ForegroundColor Green }
     catch {
       Write-Warning ("شروع " + $name + " ناموفق: " + $_.Exception.Message)
@@ -483,7 +528,7 @@ if ($UninstallServices) {
   foreach ($name in @('RosePostgres', 'RoseNginx', 'RoseBeat', 'RoseWorker', 'RoseApi', 'RoseRedis')) {
     $s = Get-Service $name -ErrorAction SilentlyContinue
     if ($s) {
-      if ($s.Status -eq 'Running') { Stop-Service $name -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2 }
+      Stop-RoseServiceSafe -Name $name -TimeoutSec 20; Start-Sleep -Seconds 2
       & sc.exe delete $name | Out-Null
       Write-Host ("   حذف شد: " + $name)
     }
@@ -495,7 +540,9 @@ if ($UninstallServices) {
 if ($Stop) {
   foreach ($name in @('RosePostgres', 'RoseNginx', 'RoseBeat', 'RoseWorker', 'RoseApi', 'RoseRedis')) {
     $s = Get-Service $name -ErrorAction SilentlyContinue
-    if ($s -and $s.Status -eq 'Running') { Stop-Service $name -Force -ErrorAction SilentlyContinue; Write-Host ("   متوقف شد: " + $name) }
+    Stop-RoseServiceSafe -Name $name -TimeoutSec 20
+    $s2 = Get-Service $name -ErrorAction SilentlyContinue
+    if (-not $s2 -or $s2.Status -eq 'Stopped') { Write-Host ("   متوقف شد: " + $name) } else { Write-Warning ("   متوقف نشد: " + $name) }
   }
   return
 }
@@ -509,6 +556,13 @@ if ($Start -or $Restart) {
   elseif (Get-Service RosePostgres -ErrorAction SilentlyContinue) { $startList += 'RosePostgres' }
   $startList += @('RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')
   foreach ($name in $startList) {
+    if ($name -eq 'RoseNginx') {
+      $ns = Get-Service RoseNginx -ErrorAction SilentlyContinue
+      if (-not $ns -or $ns.Status -ne 'Running') {
+        Get-Process nginx -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$stack\nginx*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+      }
+    }
     $s = Get-Service $name -ErrorAction SilentlyContinue
     if ($s) { try { Start-Service $name -ErrorAction Stop; Write-Host ("   شروع شد: " + $name) -ForegroundColor Green } catch { Write-Warning "$name : $($_.Exception.Message)" } }
   }

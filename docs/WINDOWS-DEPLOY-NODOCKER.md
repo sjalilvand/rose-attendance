@@ -246,3 +246,20 @@ Start-Service rosepsy-pg
 - **API های جدید** (فقط HR/ADMIN): `GET/POST /api/v1/management/personnel/`، `PATCH .../personnel/{id}/`، `POST .../personnel/{id}/create-user/`، `GET /api/v1/management/users/`، `PATCH .../users/{id}/`، `POST .../users/{id}/set-password/`، `POST /api/v1/management/seed-demo/`.
 - **رفع ۵۰۰ برای حساب‌های بدون پروندهٔ پرسنلی**: کارکرد (history)، کارت امروز، درخواست‌ها و ثبت تردد برای حساب‌هایی که به پروندهٔ پرسنلی وصل نیستند دیگر خطای ۵۰۰ نمی‌دهند؛ پیام روشن «حساب شما به پروندهٔ پرسنلی متصل نیست» (کد `NO_EMPLOYEE_PROFILE`) برمی‌گردد و فهرست‌ها خالی می‌شوند. کافی است مدیر در صفحهٔ «مدیریت» پرونده بسازد یا حساب موجود را به پرونده متصل کند.
 - پس از به‌روزرسانی: `run-rose.ps1 -Restart` کافی است (مهاجرت دیتابیس و نصب پکیج جدید لازم نیست).
+
+---
+
+## ۱۰) تغییرات نسخه ۳.۷ — رفع گیر کردن توقف RoseNginx
+
+- علت گیر کردن `-Restart`/`-Stop` روی nginx: سیگنال توقف `-s quit` «خاموشی تدریجی» است و منتظر بسته‌شدن همه اتصال‌های باز (وب‌سوکت PWA کاربران متصل و keep-alive مرورگر) می‌ماند؛ در نتیجه توقف سرویس تا بی‌نهایت طول می‌کشد.
+- **RoseNginx حالا با `-s stop` (خاموشی سریع) متوقف می‌شود.**
+- XML همه سرویس‌های WinSW دارای `<stoptimeout>20 Sec</stoptimeout>` و `<stopparentprocessfirst>true</stopparentprocessfirst>` است — توقف هرگز بیش از حدود ۲۰ ثانیه طول نمی‌کشد و در صورت پاس ندادن، درخت پروسه به‌اجبار بسته می‌شود.
+- تابع جدید `Stop-RoseServiceSafe`: توقف با `sc.exe stop` + انتظار زمان‌دار + force-kill درخت پروسه (`taskkill /T /F`). همهٔ مسیرهای `-Stop`، `-Restart` و `-UninstallServices` از آن استفاده می‌کنند (دیگر کنسول گیر نمی‌کند).
+- پیش از شروع RoseNginx، پروسه‌های nginx یتیم (بدون سرویس) خودکار بسته می‌شوند تا تداخل پورت 8085 پیش نیاید.
+- رفع فوری بدون آپدیت (اگر کنسول روی «Waiting for service ... to stop» گیر کرد): `Ctrl+C` بزنید و در پنجرهٔ جدید:
+
+```powershell
+Get-Process nginx, RoseNginx -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep 3
+powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -Start
+```
