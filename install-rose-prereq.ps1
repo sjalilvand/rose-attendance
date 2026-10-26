@@ -389,33 +389,51 @@ databases 16
 }
 
 # ------------------------------------------------------------------ NSSM -----
-Write-Host '-- ۶/۷ NSSM (مدیریت سرویس‌ها) --' -ForegroundColor Yellow
+Write-Host '-- ۶/۷ مدیر سرویس‌ها (WinSW / NSSM) --' -ForegroundColor Yellow
 $nssmDir = "$stack\nssm"
+$winswDir = "$stack\winsw"
+$winswExe = "$winswDir\WinSW-x64.exe"
 if (Test-Path "$nssmDir\nssm.exe") {
-  Write-Host '   موجود است.' -ForegroundColor Green
-  $report['nssm'] = "$nssmDir\nssm.exe"
+  Write-Host '   NSSM موجود است.' -ForegroundColor Green
+  $report['service_mgr'] = "$nssmDir\nssm.exe"
+} elseif (Test-Path $winswExe) {
+  Write-Host '   WinSW موجود است.' -ForegroundColor Green
+  $report['service_mgr'] = $winswExe
 } else {
-  $f = "$tmp\nssm-2.24.zip"
+  # ابتدا WinSW از GitHub Releases (منبع پایدار؛ NSSM آینه‌های ناپایداری دارد)
+  $f = "$tmp\WinSW-x64.exe"
   $ok = Get-WebFile @(
-    'https://github.com/kirillkovalenko/nssm/releases/download/2.24/nssm-2.24.zip',
-    'https://nssm.cc/release/nssm-2.24.zip'
+    'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe',
+    'https://github.com/winsw/winsw/releases/download/v2.11.0/WinSW-x64.exe'
   ) $f
   if ($ok) {
-    Expand-Archive -Force -Path $f -DestinationPath "$tmp\nssm"
-    New-Item -ItemType Directory -Force -Path $nssmDir | Out-Null
-    Copy-Item "$tmp\nssm\nssm-2.24\win64\nssm.exe" $nssmDir -Force -ErrorAction SilentlyContinue
-    Copy-Item "$tmp\nssm\win64\nssm.exe" $nssmDir -Force -ErrorAction SilentlyContinue
-    if (Test-Path "$nssmDir\nssm.exe") {
-      $report['nssm'] = "$nssmDir\nssm.exe"
-      Write-Host '   نصب شد.' -ForegroundColor Green
-    } else {
-      Write-Warning 'زیپ NSSM باز شد ولی nssm.exe پیدا نشد — دستی win64\nssm.exe را در C:\rose-stack\nssm بگذارید.'
-      $report['nssm'] = 'FAILED (extract issue)'
-    }
+    New-Item -ItemType Directory -Force -Path $winswDir | Out-Null
+    Copy-Item $f $winswExe -Force
+    $report['service_mgr'] = $winswExe
+    Write-Host '   WinSW نصب شد (مدیر سرویس ویندوزی).' -ForegroundColor Green
   } else {
-    Write-Warning 'دانلود NSSM ناموفق بود — دستی nssm.exe (win64) را در C:\rose-stack\nssm بگذارید.'
-    Write-Warning '  منبع: https://github.com/kirillkovalenko/nssm/releases (nssm-2.24.zip)'
-    $report['nssm'] = 'FAILED'
+    # جایگزین: NSSM از میرورها
+    $f2 = "$tmp\nssm-2.24.zip"
+    $ok2 = Get-WebFile @(
+      'https://github.com/kirillkovalenko/nssm/releases/download/2.24/nssm-2.24.zip',
+      'https://nssm.cc/release/nssm-2.24.zip'
+    ) $f2
+    if ($ok2) {
+      Expand-Archive -Force -Path $f2 -DestinationPath "$tmp\nssm"
+      New-Item -ItemType Directory -Force -Path $nssmDir | Out-Null
+      Copy-Item "$tmp\nssm\nssm-2.24\win64\nssm.exe" $nssmDir -Force -ErrorAction SilentlyContinue
+      Copy-Item "$tmp\nssm\win64\nssm.exe" $nssmDir -Force -ErrorAction SilentlyContinue
+      if (Test-Path "$nssmDir\nssm.exe") {
+        $report['service_mgr'] = "$nssmDir\nssm.exe"
+        Write-Host '   NSSM نصب شد.' -ForegroundColor Green
+      } else {
+        Write-Warning 'زیپ NSSM باز شد ولی nssm.exe داخلش پیدا نشد.'
+        $report['service_mgr'] = 'FAILED'
+      }
+    } else {
+      Write-Warning 'دانلود WinSW و NSSM هر دو ناموفق بود — run-rose.ps1 هنگام ساخت سرویس‌ها دوباره WinSW را دانلود می‌کند.'
+      $report['service_mgr'] = 'FAILED (run-rose will retry WinSW)'
+    }
   }
 }
 
@@ -499,6 +517,7 @@ $stackEnv = @"
 `$RoseRedis     = '$redisDir\redis-server.exe'
 `$RoseRedisConf = '$redisDir\redis.conf'
 `$RoseNssm      = '$nssmDir\nssm.exe'
+`$RoseWinSw     = '$winswDir\WinSW-x64.exe'
 `$RoseNginx     = '$nginxDir\nginx.exe'
 `$RoseWebPort   = $RoseWebPort
 `$RoseApiPort   = $RoseApiPort

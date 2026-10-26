@@ -107,14 +107,24 @@ $dbPassword = (Get-Content (Join-Path $secretsDir 'db_password.txt') -Raw).Trim(
 # ------------------------------------------------- ۲) دیتابیس ----------------
 Write-Host '-- ۲/۷ ساخت دیتابیس و کاربر در PostgreSQL --' -ForegroundColor Yellow
 $pgPwFile = "$stack\secrets\pg_postgres_password.txt"
+$pgPwSource = 'param (-PostgresPassword)'
 if ([string]::IsNullOrWhiteSpace($PostgresPassword)) {
-  if (Test-Path $pgPwFile) { $PostgresPassword = (Get-Content $pgPwFile -Raw).Trim() }
+  if (Test-Path $pgPwFile) {
+    $PostgresPassword = (Get-Content $pgPwFile -Raw).Trim()
+    $pgPwSource = 'file: ' + $pgPwFile
+  }
 }
 if ([string]::IsNullOrWhiteSpace($PostgresPassword)) {
+  $pgPwSource = 'manual input'
+
   $sec = Read-Host 'رمز کاربر postgres را وارد کنید' -AsSecureString
   $PostgresPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
 }
 $env:PGPASSWORD = $PostgresPassword
+Write-Host ("   منبع رمز postgres: " + $pgPwSource)
+if ($pgPwSource -notlike 'file:*') {
+  try { [System.IO.File]::WriteAllText($pgPwFile, $PostgresPassword) } catch { }
+}
 
 function Invoke-Psql([string]$sql) {
   & $psql -h 127.0.0.1 -p 5432 -U postgres -v ON_ERROR_STOP=1 -c $sql
@@ -123,10 +133,31 @@ function Invoke-Psql([string]$sql) {
 
 # تست اتصال
 & $psql -h 127.0.0.1 -p 5432 -U postgres -c "SELECT version();" | Out-Null
-if ($LASTEXITCODE -ne 0) { Write-Error 'اتصال به PostgreSQL با کاربر postgres ناموفق بود (رمز را بررسی کنید).'; exit 1 }
+if ($LASTEXITCODE -ne 0) {
+  Write-Warning 'اتصال به PostgreSQL با کاربر postgres ناموفق بود.'
+  Write-Host ''
+  Write-Host '   علت رایج: رمز ذخیره‌شده در C:\rose-stack\secrets\pg_postgres_password.txt (از اجرای قبلی) با رمز واقعی این نمونه PostgreSQL (rosepsy) نمی‌خواند.' -ForegroundColor Yellow
+  Write-Host '   راه A) اگر رمز postgres را می‌دانید (رمزی که هنگام نصب PostgreSQL تعیین کرده‌اید):' -ForegroundColor Cyan
+  Write-Host '      powershell -ExecutionPolicy Bypass -File .\install-rose-app.ps1 -PostgresPassword "رمز-واقعی-postgres" -AdminPassword "رمز-ادمین"'
+  Write-Host '   راه B) اگر رمز را نمی‌دانید — با اسکریپت زیر ریست کنید (سرویس PostgreSQL چند ثانیه ری‌استارت می‌شود):' -ForegroundColor Cyan
+  Write-Host '      powershell -ExecutionPolicy Bypass -File .\reset-postgres-password.ps1 -NewPassword "رمز-جدید-قوی"'
+  Write-Host '   سپس دوباره همین اسکریپت را اجرا کنید.' -ForegroundColor Cyan
+  exit 1
+}
 Write-Host '   اتصال PostgreSQL برقرار است.'
 
 # کاربر rose_app (SUPERUSER تا مهاجرت‌ها و افزونه‌ها بدون مشکل ساخته شوند)
+# بررسی نسخه سرور PostgreSQL (Django 6.1 به PostgreSQL 14+ نیاز دارد)
+try {
+  $pgVerRaw = (& $psql -tA -h 127.0.0.1 -p 5432 -U postgres -c "SHOW server_version_num;") 2>$null
+  $pgMajor = [math]::Floor([int]("$pgVerRaw".Trim()) / 10000)
+  if ($pgMajor -ge 14) {
+    Write-Host ("   نسخه PostgreSQL سرور: " + $pgMajor)
+  } else {
+    Write-Warning ("نسخه PostgreSQL سرور " + $pgMajor + " است؛ Django 6.1 به PostgreSQL 14+ نیاز دارد و ممکن است مهاجرت‌ها شکست بخورند.")
+  }
+} catch { }
+
 $roleExists = & $psql -tA -h 127.0.0.1 -p 5432 -U postgres -c "SELECT 1 FROM pg_roles WHERE rolname='rose_app';"
 if ("$roleExists".Trim() -ne '1') {
   Invoke-Psql "CREATE ROLE rose_app LOGIN SUPERUSER PASSWORD '$dbPassword';"

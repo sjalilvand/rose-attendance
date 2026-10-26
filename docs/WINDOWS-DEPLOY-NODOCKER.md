@@ -1,4 +1,4 @@
-# استقرار «رز سفید» روی Windows Server بدون Docker
+﻿# استقرار «رز سفید» روی Windows Server بدون Docker
 
 این راهنما اجرای کامل سامانه روی **Windows Server 2025** بدون هیچ‌گونه Docker/WSL است.
 همه‌چیز به‌صورت سرویس‌های بومی ویندوز اجرا می‌شود و بعد از ری‌بوت سرور خودکار بالا می‌آید.
@@ -77,13 +77,37 @@ C:\rose-stack\logs\RoseRedis.out.log
 2. رمز را در `C:\rose-stack\secrets\pg_postgres_password.txt` ذخیره کنید (فقط متن رمز).
 3. دوباره `install-rose-prereq.ps1` و سپس `install-rose-app.ps1` را اجرا کنید.
 
-### nssm.exe ناقص است؟
-فایل `win64\nssm.exe` را از `https://github.com/kirillkovalenko/nssm/releases` بگیرید و در `C:\rose-stack\nssm\nssm.exe` بگذارید.
+### تغییرات نسخه ۳ (رمز PostgreSQL و مدیر سرویس)
+- `install-rose-app.ps1` حالا پارامتر **`-PostgresPassword`** دارد؛ اگر داده شود ذخیره می‌شود و در اجراهای بعدی استفاده می‌گردد. منبع رمز در خروجی اسکریپت چاپ می‌شود.
+- اسکریپت جدید **`reset-postgres-password.ps1`** رمز postgres نمونه‌ی موجود (مثلاً rosepsy) را وقتی رمزش را نمی‌دانید ریست می‌کند.
+- مدیر سرویس از NSSM به **WinSW** تغییر اولویت یافت (دانلود از GitHub Releases پایدار است)؛ `run-rose.ps1` اگر NSSM نبود، خودش WinSW را دانلود و استفاده می‌کند.
+
+### رمز postgres را نمی‌دانید / خطای password authentication failed؟
+این خطا یعنی PostgreSQL در حال اجراست ولی رمز خوانده‌شده از
+`C:\rose-stack\secrets\pg_postgres_password.txt` (از اجرای قبلی) با رمز واقعی نمونه‌ی شما نمی‌خواند.
+
+**راه A — رمز را می‌دانید** (رمزی که هنگام نصب PostgreSQL/rosepsy تعیین شده):
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-rose-app.ps1 -PostgresPassword "رمز-واقعی" -AdminPassword "رمز-ادمین"
+```
+
+**راه B — رمز را نمی‌دانید:** اسکریپت ریست، pg_hba.conf را موقتاً trust می‌کند، رمز را عوض می‌کند و همه‌چیز را برمی‌گرداند (سرویس PostgreSQL چند ثانیه ری‌استارت می‌شود):
+```powershell
+powershell -ExecutionPolicy Bypass -File .\reset-postgres-password.ps1 -NewPassword "رمز-جدید-قوی"
+powershell -ExecutionPolicy Bypass -File .\install-rose-app.ps1 -AdminPassword "رمز-ادمین"
+```
+رمز جدید در `C:\rose-stack\secrets\pg_postgres_password.txt` ذخیره می‌شود تا مراحل بعدی خودکار باشند.
+
+### مدیر سرویس‌ها (WinSW / NSSM)
+- اگر `C:\rose-stack\winsw\WinSW-x64.exe` موجود باشد → سرویس‌ها با WinSW ساخته می‌شوند (XML هر سرویس: `C:\rose-stack\winsw\<نام-سرویس>\<نام-سرویس>.xml`).
+- اگر `C:\rose-stack\nssm\nssm.exe` موجود باشد → همان NSSM قبلی استفاده می‌شود.
+- اگر هیچ‌کدام نباشد → `run-rose.ps1 -InstallServices` خودش WinSW را دانلود می‌کند (GitHub Releases).
+- وضعیت/شروع/توقف همه‌ی سرویس‌ها مستقل از ابزار با `Get-Service Rose*` / `Start-Service` / `Stop-Service` کار می‌کند.
 
 ### سرویسی بالا نیامد؟
 ```powershell
 Get-Service Rose*
-C:\rose-stack\nssm\nssm.exe status RoseApi
+Get-Service RoseApi | Format-List Name, Status
 type C:\rose-stack\logs\RoseApi.err.log
 # شروع مجدد تک‌سرویس:
 Restart-Service RoseApi
