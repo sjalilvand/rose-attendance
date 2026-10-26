@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  مدیریت اجرای سامانه رز سفید بدون Docker — نسخه ۳.۳ (WinSW / NSSM).
+  مدیریت اجرای سامانه رز سفید بدون Docker — نسخه ۳.۴ (WinSW / NSSM).
 
 .DESCRIPTION
   پورت‌ها: بک‌اند 3005 و وب 8085.
@@ -176,8 +176,21 @@ function Install-Winsw($svc) {
   if ($needInstall) {
     Write-Host ("     به‌روزرسانی پیکربندی سرویس " + $svc.Name + " ...")
     & sc.exe stop $svc.Name | Out-Null
-    Start-Sleep -Seconds 2
+    $waited = 0
+    while ($waited -lt 20) {
+      $st = (Get-Service $svc.Name -ErrorAction SilentlyContinue)
+      if (-not $st -or $st.Status -eq 'Stopped') { break }
+      Start-Sleep -Seconds 1
+      $waited++
+    }
+    Start-Sleep -Seconds 1
     & $exe uninstall | Out-Null
+    $waited = 0
+    while ($waited -lt 10) {
+      if (-not (Get-Service $svc.Name -ErrorAction SilentlyContinue)) { break }
+      Start-Sleep -Seconds 1
+      $waited++
+    }
     Start-Sleep -Seconds 1
   }
   if ($needInstall -or -not (Test-Path $exe)) { Copy-Item $winswExe $exe -Force }
