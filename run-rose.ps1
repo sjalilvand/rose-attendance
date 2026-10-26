@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  مدیریت اجرای سامانه رز سفید بدون Docker — نسخه ۳.۴ (WinSW / NSSM).
+  مدیریت اجرای سامانه رز سفید بدون Docker — نسخه ۳.۵ (WinSW / NSSM).
 
 .DESCRIPTION
   پورت‌ها: بک‌اند 3005 و وب 8085.
@@ -58,6 +58,7 @@ if (Test-Path $envFile) {
 }
 
 $script:SvcTool = $null
+$script:ExternalPgService = $null
 
 function Get-ServiceTool {
   if (Test-Path $nssm) { return 'nssm' }
@@ -96,10 +97,55 @@ $services = @(
   @{ Name='RoseNginx';  App="$stack\nginx\nginx.exe"; Args=''; Dir="$stack\nginx"; Deps=@(); StopExe="$stack\nginx\nginx.exe"; StopArgs='-s quit' }
 )
 
-function Get-PgServiceName {
-  $s = Get-Service postgresql* -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($s) { return $s.Name }
+function Find-ExternalPgService {
+  # سرویس PostgreSQL «خارجی» (غیر از سرویس‌های خودمان) را پیدا می‌کند.
+  # ۱) بر اساس نام/نام‌نمایی: postgres یا pgsql یا توکن مستقل pg (مثل rosepsy-pg)
+  # ۲) بر اساس پروسه: سرویسی که postgres.exe (یا فرزند مستقیم آن) را اجرا می‌کند
+  $ours = @('RosePostgres')
+  $cands = @()
+  foreach ($s in (Get-Service -ErrorAction SilentlyContinue)) {
+    if ($ours -contains $s.Name) { continue }
+    if (($s.Name -match '(?i)postgres|pgsql') -or
+        ($s.Name -match '(?i)(^|[-_])pg([-_]|$)') -or
+        ($s.DisplayName -match '(?i)postgres|pgsql')) {
+      if ($cands -notcontains $s.Name) { $cands += $s.Name }
+    }
+  }
+  try {
+    $pgProcs = @(Get-CimInstance Win32_Process -Filter "Name='postgres.exe'" -ErrorAction SilentlyContinue)
+    $svcList = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Running' -and $_.ProcessId -gt 0 })
+    foreach ($w in $svcList) {
+      if ($ours -contains $w.Name) { continue }
+      $hit = $pgProcs | Where-Object { $_.ProcessId -eq $w.ProcessId -or $_.ParentProcessId -eq $w.ProcessId }
+      if ($hit -and ($cands -notcontains $w.Name)) { $cands += $w.Name }
+    }
+  } catch { }
+  if ($cands.Count -gt 0) { return $cands[0] }
   return $null
+}
+
+function Remove-DuplicateRosePostgres {
+  # اگر از نصب‌های قبلی (نسخه ≤۳.۴) سرویس تکراری RosePostgres روی datadir
+  # سرویس دیگری ساخته شده باشد، آن را متوقف و حذف می‌کند.
+  $s = Get-Service RosePostgres -ErrorAction SilentlyContinue
+  if (-not $s) { return }
+  Write-Host '   سرویس تکراری RosePostgres یافت شد — حذف می‌شود (datadir متعلق به سرویس دیگر است) ...' -ForegroundColor Yellow
+  if ($s.Status -eq 'Running') {
+    Stop-Service RosePostgres -Force -ErrorAction SilentlyContinue
+    $waited = 0
+    while ($waited -lt 20) {
+      $st = (Get-Service RosePostgres -ErrorAction SilentlyContinue)
+      if (-not $st -or $st.Status -eq 'Stopped') { break }
+      Start-Sleep -Seconds 1
+      $waited++
+    }
+  }
+  $wexe = "$winswDir\RosePostgres\RosePostgres.exe"
+  if (Test-Path $wexe) { & $wexe uninstall 2>$null | Out-Null }
+  & sc.exe delete RosePostgres | Out-Null
+  Start-Sleep -Seconds 2
+  if (-not $script:RosePgBin -or -not $script:RosePgData) { Resolve-PostgresPaths | Out-Null }
+  Stop-ManualPostgres
 }
 
 function Assert-CorePrereq {
@@ -238,6 +284,33 @@ function Resolve-PostgresPaths {
 }
 
 function Install-PostgresService {
+  # اگر PostgreSQL سرویس ویندوزی مستقل خودش را دارد (مثلاً rosepsy-pg)،
+  # هرگز سرویس تکراری RosePostgres روی datadir همان سرویس ساخته نمی‌شود.
+  $extPg = Find-ExternalPgService
+  if ($extPg) {
+    Write-Host ("   PostgreSQL سرویس ویندوزی مستقل دارد: " + $extPg + " — از همان استفاده می‌شود.")
+    $script:ExternalPgService = $extPg
+    Remove-DuplicateRosePostgres
+    $extSvc = Get-Service $extPg -ErrorAction SilentlyContinue
+    if ($extSvc -and $extSvc.Status -ne 'Running') {
+      Write-Host ("   شروع سرویس " + $extPg + " ...")
+      try { Start-Service $extPg -ErrorAction Stop } catch { Write-Warning ("شروع " + $extPg + " ناموفق: " + $_.Exception.Message) }
+      $st = $null
+      $waited = 0
+      while ($waited -lt 30) {
+        $st = (Get-Service $extPg -ErrorAction SilentlyContinue)
+        if ($st -and $st.Status -eq 'Running') { break }
+        Start-Sleep -Seconds 1
+        $waited++
+      }
+      if ($st -and $st.Status -eq 'Running') {
+        Write-Host ("   سرویس " + $extPg + " در حال اجراست.") -ForegroundColor Green
+      } else {
+        Write-Warning ("سرویس " + $extPg + " بالا نیامد — لاگ همان سرویس را بررسی کنید.")
+      }
+    }
+    return $false
+  }
   if (-not (Resolve-PostgresPaths)) {
     Write-Warning 'با -WithPostgres مسیر PostgreSQL یافت نشد — سرویس RosePostgres ساخته نشد.'
     return $false
@@ -247,11 +320,6 @@ function Install-PostgresService {
   Write-Host ("   PostgreSQL bin : " + $pgBin)
   Write-Host ("   PostgreSQL data: " + $pgData)
 
-  $pgSvc = Get-CimInstance Win32_Service -Filter "Name LIKE 'postgresql%'" -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($pgSvc) {
-    Write-Host ("   PostgreSQL سرویس ویندوزی خودش را دارد: " + $pgSvc.Name + " — RosePostgres ساخته نمی‌شود.")
-    return $false
-  }
   if ($script:SvcTool -ne 'winsw') {
     Write-Warning 'سرویس RosePostgres فقط با WinSW پشتیبانی می‌شود — رد شد.'
     return $false
@@ -300,12 +368,36 @@ function Install-PostgresService {
 }
 
 function Stop-ManualPostgres {
+  # فقط نمونه «دستی» PostgreSQL را متوقف می‌کند؛ پروسه‌های متعلق به هر سرویس
+  # ویندوزی (مثل rosepsy-pg) هرگز دست نمی‌خورند.
   try {
     $portBusy = Get-NetTCPConnection -State Listen -LocalPort 5432 -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $portBusy) { return }
-    Write-Host '   توقف نمونه دستی PostgreSQL برای تحویل به سرویس RosePostgres ...'
-    & (Join-Path $script:RosePgBin 'pg_ctl.exe') -D $script:RosePgData -m fast stop 2>$null | Out-Null
+    $ownerPid = [int]$portBusy.OwningProcess
+    $svcOwner = Get-CimInstance Win32_Service -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
+    if ($svcOwner) {
+      Write-Host ("   پورت 5432 در اختیار سرویس ویندوزی «" + $svcOwner.Name + "» است — دست نمی‌زنیم.")
+      return
+    }
+    $ownerProc = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
+    if ($ownerProc) {
+      $parSvc = Get-CimInstance Win32_Service -Filter "ProcessId=$($ownerProc.ParentProcessId)" -ErrorAction SilentlyContinue
+      if ($parSvc) {
+        Write-Host ("   پورت 5432 متعلق به سرویس ویندوزی «" + $parSvc.Name + "» است — دست نمی‌زنیم.")
+        return
+      }
+    }
+    Write-Host '   توقف نمونه دستی PostgreSQL برای تحویل پورت 5432 ...'
+    if ($script:RosePgBin -and $script:RosePgData -and (Test-Path (Join-Path $script:RosePgBin 'pg_ctl.exe'))) {
+      & (Join-Path $script:RosePgBin 'pg_ctl.exe') -D $script:RosePgData -m fast stop 2>$null | Out-Null
+    }
     Start-Sleep -Seconds 3
+    $still = Get-NetTCPConnection -State Listen -LocalPort 5432 -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($still) {
+      Write-Host '   توقف اجباری پروسه یتیم PostgreSQL روی 5432 ...' -ForegroundColor Yellow
+      Stop-Process -Id ([int]$still.OwningProcess) -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 2
+    }
   } catch { }
 }
 
@@ -336,13 +428,15 @@ if ($InstallServices) {
 
   # سرویس PostgreSQL (اختیاری — -WithPostgres): استارت خودکار پس از بوت
   if ($WithPostgres) {
-    Write-Host '   سرویس PostgreSQL (RosePostgres) ...'
+    Write-Host '   سرویس PostgreSQL (-WithPostgres) ...'
     $pgReady = Install-PostgresService
     if ($pgReady) { Stop-ManualPostgres }
   }
 
-  # وابستگی RoseApi به سرویس PostgreSQL (اگر سرویس آن پیدا شود)
-  $pgName = Get-PgServiceName
+  # وابستگی RoseApi به سرویس PostgreSQL (سرویس خودمان یا سرویس مستقل موجود)
+  $pgName = $null
+  if (Get-Service RosePostgres -ErrorAction SilentlyContinue) { $pgName = 'RosePostgres' }
+  else { $pgName = Find-ExternalPgService }
   if ($pgName) {
     Write-Host ("   سرویس PostgreSQL: " + $pgName)
     $services[1].Deps = @('RoseRedis', $pgName)
@@ -356,6 +450,7 @@ if ($InstallServices) {
 
   $startOrder = @()
   if (Get-Service RosePostgres -ErrorAction SilentlyContinue) { $startOrder += 'RosePostgres' }
+  elseif ($script:ExternalPgService -and (Get-Service $script:ExternalPgService -ErrorAction SilentlyContinue)) { $startOrder += $script:ExternalPgService }
   $startOrder += @('RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')
   foreach ($name in $startOrder) {
     try { Start-Service $name -ErrorAction Stop; Write-Host ("   شروع شد: " + $name) -ForegroundColor Green }
@@ -408,7 +503,12 @@ if ($Stop) {
 # ================================ Start / Restart ================================
 if ($Start -or $Restart) {
   if ($Restart) { & $PSCommandPath -Stop | Out-Null; Start-Sleep -Seconds 3 }
-  foreach ($name in @('RosePostgres', 'RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')) {
+  $startList = @()
+  $extPg = Find-ExternalPgService
+  if ($extPg) { $startList += $extPg }
+  elseif (Get-Service RosePostgres -ErrorAction SilentlyContinue) { $startList += 'RosePostgres' }
+  $startList += @('RoseRedis', 'RoseApi', 'RoseWorker', 'RoseBeat', 'RoseNginx')
+  foreach ($name in $startList) {
     $s = Get-Service $name -ErrorAction SilentlyContinue
     if ($s) { try { Start-Service $name -ErrorAction Stop; Write-Host ("   شروع شد: " + $name) -ForegroundColor Green } catch { Write-Warning "$name : $($_.Exception.Message)" } }
   }
@@ -419,8 +519,12 @@ if ($Start -or $Restart) {
 if ($Status) {
   Write-Host '== وضعیت سرویس‌ها ==' -ForegroundColor Cyan
   Get-Service Rose* -ErrorAction SilentlyContinue | Format-Table Name, Status, StartType -AutoSize
+  $pgPort = 5432
+  $dbUrl = ''
+  if ($envPairs.Contains('DATABASE_URL')) { $dbUrl = [string]$envPairs['DATABASE_URL'] }
+  if ($dbUrl -match ':(\d{2,5})/') { $pgPort = [int]$Matches[1] }
   Write-Host '== وضعیت پورت‌ها ==' -ForegroundColor Cyan
-  foreach ($port in @($RoseApiPort, $RoseWebPort, 6379, 5432)) {
+  foreach ($port in @($RoseApiPort, $RoseWebPort, 6379, $pgPort)) {
     $c = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($c) {
       $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue

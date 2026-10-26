@@ -189,3 +189,50 @@ powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -Restart
   `Remove-NetFirewallRule -DisplayName "Rose Attendance API 3005"`
 - رمزهای تصادفی: `C:\rose-stack\secrets\pg_postgres_password.txt` (postgres)، `C:\rose-attendance\secrets\` (جنگو/دیتابیس). پوشه secrets هرگز نباید commit یا عمومی شود.
 - توکن GitHub که در گفتگو استفاده شد، پس از پایان استقرار باید **revoke** شود.
+
+---
+
+## ۸) تغییرات نسخه ۳.۵ — رفع ۵۰۰ سراسری و شکست ریست رمز ادمین
+
+### خطای اول: Server Error (500) هنگام ورود — دیتابیس پایین بود
+
+**ریشه:** در نسخه‌های قبل، `-WithPostgres` فقط سرویس‌هایی با نام `postgresql*` را «سرویس موجود PostgreSQL» می‌شناخت. روی این سرور، PostgreSQL متعلق به استک rosepsy با نام سرویس `rosepsy-pg` نصب است که با این الگو تطبیق نمی‌کرد. در نتیجه:
+
+1. یک سرویس تکراری `RosePostgres` روی همان datadir سرویس rosepsy-pg (`C:/rosepsy/data/pgdata`) ساخته شد؛
+2. postgres در حالِ اجرا «نمونه دستی» فرض شد و با pg_ctl متوقف شد (rosepsy-pg به Stopped رفت)؛
+3. postgres داخل سرویس RosePostgres پس از آن دیگر بالا نیامد → هیچ چیزی روی پورت دیتابیس گوش نمی‌داد → `database: error: OperationalError` → خطای 500 در لاگین پنل ادمین و اپلیکیشن.
+
+**رفع در نسخه ۳.۵:**
+
+- تشخیص سرویس PostgreSQL خارجی دومرحله‌ای شد: تطبیق نام (`postgres`، `pgsql` یا توکن مستقل `pg` مانند `rosepsy-pg`) به‌علاوه بررسی سرویس‌هایی که پروسه postgres.exe را اجرا می‌کنند.
+- اگر سرویس خارجی پیدا شود: سرویس تکراری RosePostgres به‌صورت خودکار Stop و Uninstall می‌شود، سرویس خارجی Start می‌شود و RosePostgres اصلاً ساخته نمی‌شود.
+- `Stop-ManualPostgres` دیگر هیچ پروسه متعلق به سرویس ویندوزی را نمی‌کشد (بررسی Win32_Service روی PID مالک پورت و PID والد آن) و در شکست pg_ctl، پروسه یتیم را force-kill می‌کند.
+- وابستگی RoseApi به سرویس PostgreSQL واقعی (RosePostgres یا سرویس خارجی) در XML سرویس ثبت می‌شود تا ترتیب بوت درست باشد.
+- `-Start` / `-Restart` هم در صورت وجود، سرویس PostgreSQL خارجی را قبل از بقیه شروع می‌کنند.
+- `-Status` پورت دیتابیس را از `DATABASE_URL` فایل env می‌خواند (به‌جای 5432 ثابت).
+
+### خطای دوم: شکست ریست رمز ادمین («unrecognized arguments»)
+
+**ریشه:** PowerShell 5.1 هنگام پاس‌دادن آرگومان چندخطی دارای کوتیشن دوتایی به برنامه بومی (`manage.py shell -c $code`) کوتیشن‌های داخلی را escape نمی‌کند؛ رشته پایتون وسطش می‌شکند و argparse آرگومان‌های اضافی می‌بیند.
+
+**رفع در نسخه ۳.۵:** کد پایتون در فایل `C:\rose-stack\rose-reset-admin-user.py` نوشته و با `shell -c "exec(open(r'...', encoding='utf-8').read())"` اجرا می‌شود (بدون هیچ کوتیشن دوتایی در خط فرمان). رمز همچنان از متغیر محیطی پاس می‌شود و در خط فرمان/log ظاهر نمی‌شود. یک پیش‌آزمون اتصال دیتابیس هم اضافه شد تا اگر PostgreSQL بالا نیست، پیام واضح بدهد.
+
+### ریکاوری همین سرور (پس از git pull)
+
+```powershell
+cd C:\rose-attendance
+# ۱) اصلاح سرویس دیتابیس: حذف خودکار RosePostgres تکراری + شروع rosepsy-pg + شروع بقیه سرویس‌ها
+powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -InstallServices -WithPostgres
+# ۲) ریست رمز ادمین
+powershell -ExecutionPolicy Bypass -File .\reset-admin-password.ps1 -NewPassword "رمز-جدید-قوی"
+# ۳) بررسی
+powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -Status
+curl http://127.0.0.1:8085/api/v1/health/
+```
+
+اگر `rosepsy-pg` بالا نیامد و در لاگ آن خطای دسترسی پوشه دادهشد، دسترسی اضافه‌شده توسط نسخه‌های قبل را حذف کنید و دوباره شروع کنید:
+
+```powershell
+icacls C:\rosepsy\data\pgdata /remove:g *S-1-5-20 /T
+Start-Service rosepsy-pg
+```
