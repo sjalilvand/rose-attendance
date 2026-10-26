@@ -1,0 +1,176 @@
+# Rose Attendance — HTTP-only deployment (no SSL, development phase).
+# مسیر «روی پورت و بدون SSL» — مکمل compose.yml اصلی؛ هر دو فایل را همگام نگه دارید.
+# قابل استفاده با:  docker compose -f compose.http.yml up -d
+# اسکریپت آماده:    update-http.ps1 (ویندوز)  یا  deploy/update-wsl.sh (WSL/لینوکس)
+#
+# نکته‌ها:
+#  * گیت‌وی Nginx وقتی گواهی TLS در deploy/tls نباشد، خودش در حالت HTTP خالص بالا می‌آید
+#    (docker-entrypoint.sh داخل تصویر، nginx-http.conf را فعال می‌کند) — پس نیازی به گواهی نیست.
+#  * پورت بیرونی پیش‌فرض 8080 است؛ برای تغییر فقط همین خط را ویرایش کنید:  "PORT:80"
+#  * در .env حتماً این دو مقدار را تنظیم کنید (برای IP سرور شما و پورت 8080):
+#      DJANGO_ALLOWED_HOSTS=130.185.73.157,localhost,127.0.0.1
+#      DJANGO_CSRF_TRUSTED_ORIGINS=http://130.185.73.157:8080,http://localhost
+
+name: rose-attendance
+
+x-app: &app
+  image: rose-attendance-backend:${APP_VERSION:?APP_VERSION is required}
+  build:
+    context: ./backend
+  env_file:
+    - .env
+  secrets:
+    - django_secret
+    - db_password
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.production
+    DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret
+    DB_PASSWORD_FILE: /run/secrets/db_password
+    DB_HOST: db
+    DB_PORT: "5432"
+    REDIS_URL: redis://redis:6379/0
+  networks:
+    - backend
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rose_attendance
+      POSTGRES_USER: rose_app
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U rose_app -d rose_attendance
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redisdata:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request;
+          urllib.request.urlopen(
+          'http://127.0.0.1:8000/api/v1/health/', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *app
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - config
+      - worker
+      - --loglevel=INFO
+      - --concurrency=2
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    <<: *app
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - config
+      - beat
+      - --loglevel=INFO
+      - --schedule=/var/lib/celery/celerybeat-schedule
+    volumes:
+      - beatdata:/var/lib/celery
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  gateway:
+    image: rose-attendance-web:${APP_VERSION:?APP_VERSION is required}
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    # HTTP-only: فقط پورت 80 کانتینر بیرون داده می‌شود (بدون 443 و بدون TLS)
+    ports:
+      - "8080:80"
+    volumes:
+      # پوشه خالی TLS باعث می‌شود entrypoint حالت HTTP را انتخاب کند
+      - ./deploy/tls:/etc/nginx/tls:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
+  beatdata:
+
+networks:
+  backend:
+
+secrets:
+  django_secret:
+    file: ./secrets/django_secret.txt
+  db_password:
+    file: ./secrets/db_password.txt
