@@ -82,6 +82,20 @@ C:\rose-stack\logs\RoseRedis.out.log
 - اسکریپت جدید **`reset-postgres-password.ps1`** رمز postgres نمونه‌ی موجود (مثلاً rosepsy) را وقتی رمزش را نمی‌دانید ریست می‌کند.
 - مدیر سرویس از NSSM به **WinSW** تغییر اولویت یافت (دانلود از GitHub Releases پایدار است)؛ `run-rose.ps1` اگر NSSM نبود، خودش WinSW را دانلود و استفاده می‌کند.
 
+### تغییرات نسخه ۳.۳ (میرور PyPI برای سرورهای ایران + سرویس PostgreSQL)
+- **نصب وابستگی‌ها وقتی `files.pythonhosted.org` در دسترس نیست** (خطای `ReadTimeoutError` در pip): اسکریپت حالا خودش چند منبع را به‌ترتیب امتحان می‌کند — میرور ایرانی **RunFlare**، سپس Aliyun، Tsinghua و در نهایت PyPI رسمی — و اولین منبع سالم را برای نصب استفاده می‌کند. با `-PipIndexUrl` هم می‌توانید میرور دلخواه بدهید:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\install-rose-app.ps1 -AdminPassword "رمز" -PipIndexUrl "https://mirror-pypi.runflare.com/simple"
+  ```
+- اگر `npm ci` شکست بخورد، خودکار با میرور `registry.npmmirror.com` تلاش می‌شود.
+- سرویس اختیاری **`RosePostgres`** با کلید `-WithPostgres`: اگر PostgreSQL شما سرویس ویندوزی ندارد (مثل نمونه‌ی rosepsy که با pg_ctl بالا می‌آید)، سرویس ویندوزی می‌سازد تا پس از ری‌بوت سرور دیتابیس هم خودکار بالا بیاید (حساب NetworkService + دسترسی icacls به datadir). اگر نمونه PostgreSQL از قبل سرویس داشته باشد، دست نمی‌زند. اگر شروع سرویس ناموفق باشد، سرویس حذف و PostgreSQL همان‌طور دستی روشن می‌شود تا نصب متوقف نشود:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\run-rose.ps1 -InstallServices -WithPostgres
+  ```
+- رفع باگ اندازه لاگ WinSW (قبلاً هر ۱۰ کیلوبایت می‌چرخید — حالا ۱۰ مگابایت).
+- `createsuperuser` حالا idempotent است (اگر admin موجود باشد رمز را دست نمی‌زند).
+- در شکست شروع هر سرویس، چند خط آخر لاگ همان سرویس چاپ می‌شود.
+
 ### رمز postgres را نمی‌دانید / خطای password authentication failed؟
 این خطا یعنی PostgreSQL در حال اجراست ولی رمز خوانده‌شده از
 `C:\rose-stack\secrets\pg_postgres_password.txt` (از اجرای قبلی) با رمز واقعی نمونه‌ی شما نمی‌خواند.
