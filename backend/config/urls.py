@@ -28,6 +28,7 @@ from apps.people.management_api import (
     ManagementUserSetPassword,
     ManagementUsersList,
 )
+from apps.people.rose_sso import RoseSSOView
 from apps.people.api import (
     MeView,
     PersonnelImportTemplateView,
@@ -73,6 +74,8 @@ router.register("messages/notifications", NotificationViewSet, basename="msg-not
 
 api_v1 = [
     path("auth/token/", TokenObtainPairWithLockoutView.as_view(), name="token-obtain-pair"),
+    # ورود یکپارچه (SSO) با رز هاب — Rose Hub
+    path("auth/rose-sso/", RoseSSOView.as_view(), name="rose-sso"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("me/", MeView.as_view(), name="me"),
     path("people/import/", PersonnelImportView.as_view(), name="people-import"),

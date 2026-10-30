@@ -40,6 +40,27 @@ export default function LoginPage() {
           <h1>رز سفید</h1>
           <p>سامانه حضور و غیاب — ثبت تردد بدون ردیابی مستمر GPS</p>
         </div>
+        <a
+          href="http://130.185.73.157:8082/api/sso/launch?clientId=rose-techno-8a4e1f"
+          className="btn btn-primary"
+          style={{
+            display: 'block',
+            textAlign: 'center',
+            marginBottom: '14px',
+            background: '#be185d',
+            color: '#fff',
+            textDecoration: 'none',
+            padding: '10px 14px',
+            borderRadius: '8px',
+          }}
+        >
+          ورود یکپارچه با رز هاب (SSO)
+        </a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+          <span style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
+          <span style={{ fontSize: 12, color: '#9ca3af' }}>یا ورود با حساب سامانه</span>
+          <span style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
+        </div>
         <label>
           نام کاربری
           <input
