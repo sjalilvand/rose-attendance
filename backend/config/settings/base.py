@@ -184,8 +184,10 @@ ROSE_HUB_CLIENT_SECRET = os.environ.get(
 ).strip()
 ROSE_HUB_ISSUER = os.environ.get("ROSE_HUB_ISSUER", "rose-hub").strip()
 # نشانی پایه رز هاب برای استعلام سرویس‌به‌سرویس پروفایل (POST /api/sso/profile)
-# در ورودهای محلی (گذرواژه‌ای) — خالی یعنی همگام‌سازی ورود محلی غیرفعال است.
-ROSE_HUB_URL = os.environ.get("ROSE_HUB_URL", "http://130.185.73.157:8082").strip()
+# در ورودهای محلی (گذرواژه‌ای) — پیش‌فرض loopback چون هر دو سرویس روی یک
+# سرور هستند؛ در استقرارهای دیگر با متغیر محیطی ROSE_HUB_URL بازنویسی شود.
+# خالی یعنی همگام‌سازی ورود محلی غیرفعال است.
+ROSE_HUB_URL = os.environ.get("ROSE_HUB_URL", "http://127.0.0.1:8082").strip()
 # اعتبار توکن یک‌بارمصرف رز هاب (ثانیه) — مطابق سند پروتکل
 try:
     ROSE_HUB_TOKEN_TTL_SECONDS = int(os.environ.get("ROSE_HUB_TOKEN_TTL_SECONDS", "300"))
