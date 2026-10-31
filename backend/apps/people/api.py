@@ -17,6 +17,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .importer import ImportFormatError, build_template, import_employees
 from .models import DeviceSession, User
+from .rose_sso import sync_rose_hub_profile_for_user
 
 
 class TokenObtainPairWithLockoutSerializer(TokenObtainPairSerializer):
@@ -50,6 +51,10 @@ class TokenObtainPairWithLockoutSerializer(TokenObtainPairSerializer):
                 user.register_failed_attempt(*lock)
             raise
         user.reset_failed_attempts()
+
+        # فاز ۶۵ — ورود محلی (گذرواژه): مشخصات کامل کاربر از رز هاب استعلام
+        # و همگام می‌شود؛ در صورت قطعی رز هاب بی‌صدا رد می‌شود و ورود ادامه می‌یابد.
+        sync_rose_hub_profile_for_user(user)
         user.last_login = timezone.now()
         user.save(update_fields=["last_login", "updated_at"])
 

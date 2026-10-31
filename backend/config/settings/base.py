@@ -183,6 +183,9 @@ ROSE_HUB_CLIENT_SECRET = os.environ.get(
     "4b8e2f6a0d1c5e93a7f3b9d1c0e6f428b5a9d3e1c7f5a0b2d8e4c6f0a2b7d139",
 ).strip()
 ROSE_HUB_ISSUER = os.environ.get("ROSE_HUB_ISSUER", "rose-hub").strip()
+# نشانی پایه رز هاب برای استعلام سرویس‌به‌سرویس پروفایل (POST /api/sso/profile)
+# در ورودهای محلی (گذرواژه‌ای) — خالی یعنی همگام‌سازی ورود محلی غیرفعال است.
+ROSE_HUB_URL = os.environ.get("ROSE_HUB_URL", "http://130.185.73.157:8082").strip()
 # اعتبار توکن یک‌بارمصرف رز هاب (ثانیه) — مطابق سند پروتکل
 try:
     ROSE_HUB_TOKEN_TTL_SECONDS = int(os.environ.get("ROSE_HUB_TOKEN_TTL_SECONDS", "300"))

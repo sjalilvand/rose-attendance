@@ -27,6 +27,9 @@
 
 from __future__ import annotations
 
+import json as _json
+import urllib.request
+
 import jwt
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -128,6 +131,62 @@ def _sync_sso_profile(user, payload: dict) -> dict:
         if emp_changed:
             employee.save(update_fields=[*emp_changed, "updated_at"])
     return mapping
+
+
+def _fetch_rose_hub_profile(username: str) -> dict | None:
+    """استعلام مشخصات کاربر از رز هاب (سرویس‌به‌سرویس) — POST /api/sso/profile.
+
+    با clientId/clientSecret اختصاصی همین سامانه احراز می‌شود؛ در صورت
+    در دسترس نبودن رز هاب یا پیدا نشدن کاربر، None برمی‌گردد (هرگز خطا
+    نمی‌اندازد تا ورود محلی به‌خوبی رز هاب کار نکند).
+    """
+    base = (getattr(settings, "ROSE_HUB_URL", "") or "").strip().rstrip("/")
+    username = (username or "").strip()
+    if not base or not username:
+        return None
+    body = _json.dumps(
+        {
+            "clientId": settings.ROSE_HUB_CLIENT_ID,
+            "clientSecret": settings.ROSE_HUB_CLIENT_SECRET,
+            "username": username,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/api/sso/profile",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec - آدرس از تنظیمات سرور
+            payload = _json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or not payload.get("found"):
+        return None
+    profile = payload.get("profile")
+    return profile if isinstance(profile, dict) else None
+
+
+def sync_rose_hub_profile_for_user(user) -> bool:
+    """همگام‌سازی پروفایل کاربر از رز هاب برای ورودهای محلی (گذرواژه‌ای).
+
+    رز هاب منبع حقیقت مشخصات است؛ با هر ورود موفق با گذرواژه، مشخصات کامل
+    (نام، موبایل، کد ملی، استان، کد استان، کلینک) استعلام و روی حساب و
+    پروندهٔ پرسنلی پیوند‌شده اعمال می‌شود. ناموفق بودن استعلام (قطعی شبکه
+    و…) هرگز مانع ورود نمی‌شود.
+    """
+    try:
+        profile = _fetch_rose_hub_profile(getattr(user, "username", "") or "")
+    except Exception:  # pragma: no cover - محافظت کامل
+        return False
+    if not profile:
+        return False
+    try:
+        _sync_sso_profile(user, profile)
+    except Exception:  # pragma: no cover - همگام‌سازی هرگز ورود را نشکند
+        return False
+    return True
 
 
 def _login_from_rose_hub(request: Request, raw_token: str) -> dict:

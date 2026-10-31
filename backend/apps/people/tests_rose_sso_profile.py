@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+from unittest import mock
+
 import jwt as pyjwt
 from django.conf import settings
 from django.test import TestCase
@@ -149,3 +151,72 @@ class RoseSSOProfileTests(TestCase):
         employee.refresh_from_db()
         self.assertEqual(employee.first_name, "رضا")
         self.assertEqual(employee.last_name, "سفید")
+
+    def test_password_login_syncs_profile_from_rose_hub(self):
+        """ورود محلی (گذرواژه) هم پروفایل را از رز هاب استعلام و همگام می‌کند.
+
+        سناریوی گزارش‌شده: کاربر مستقیماً در سامانه با گذرواژه وارد می‌شود؛
+        مشخصات رز هاب (که فقط در ورود SSO همگام می‌شد) باید اینجا هم اعمال شود.
+        """
+        User.objects.create_user(username="1282777076", password="test-pass-123")
+        profile = {
+            "email": "1282777076@rose.ir",
+            "name": "نرگس عطاران",
+            "role": "THERAPIST",
+            "username": "1282777076",
+            "nationalId": "1282777076",
+            "mobile": "09131291153",
+            "province": "اصفهان",
+            "provinceCode": "009007",
+            "clinic": "کلینیک رز اصفهان",
+        }
+        with mock.patch(
+            "apps.people.rose_sso._fetch_rose_hub_profile", return_value=profile
+        ):
+            r = self.client.post(
+                "/api/v1/auth/token/",
+                {"username": "1282777076", "password": "test-pass-123"},
+                format="json",
+            )
+        self.assertEqual(r.status_code, 200, r.content)
+
+        user = User.objects.get(username="1282777076")
+        self.assertEqual(user.full_name, "نرگس عطاران")
+        self.assertEqual(user.mobile, "09131291153")
+        self.assertEqual(user.province, "اصفهان")
+        self.assertEqual(user.province_code, "009007")
+        self.assertEqual(user.clinic, "کلینیک رز اصفهان")
+
+        # /me هم پروفایل کامل را برمی‌گرداند
+        access = r.json()["access"]
+        me = self.client.get(
+            "/api/v1/me/", HTTP_AUTHORIZATION=f"Bearer {access}"
+        ).json()
+        self.assertEqual(me["full_name"], "نرگس عطاران")
+        self.assertEqual(me["national_id"], "1282777076")
+        self.assertEqual(me["province"], "اصفهان")
+        self.assertEqual(me["clinic"], "کلینیک رز اصفهان")
+
+    def test_password_login_survives_rose_hub_outage(self):
+        """قطع/در دسترس نبودن رز هاب نباید ورود محلی را خراب کند."""
+        User.objects.create_user(username="1282777076", password="test-pass-123")
+        with mock.patch(
+            "apps.people.rose_sso._fetch_rose_hub_profile", return_value=None
+        ):
+            r_ok = self.client.post(
+                "/api/v1/auth/token/",
+                {"username": "1282777076", "password": "test-pass-123"},
+                format="json",
+            )
+        self.assertEqual(r_ok.status_code, 200, r_ok.content)
+
+        with mock.patch(
+            "apps.people.rose_sso._fetch_rose_hub_profile",
+            side_effect=RuntimeError("boom"),
+        ):
+            r_err = self.client.post(
+                "/api/v1/auth/token/",
+                {"username": "1282777076", "password": "test-pass-123"},
+                format="json",
+            )
+        self.assertEqual(r_err.status_code, 200, r_err.content)
