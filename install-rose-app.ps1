@@ -203,14 +203,52 @@ $envMap = [ordered]@{
   'DJANGO_DEBUG'                = 'False'
 }
 $envPath = "$stack\rose-backend.env"
-$lines = foreach ($k in $envMap.Keys) { "$k=$($envMap[$k])" }
+# خطوط دستی کاربر در env حفظ می‌شود (کامنت‌ها + کلیدهایی که این اسکریپت مدیریت
+# نمی‌کند؛ مثل ROSE_HUB_CLIENT_SECRET) تا هر بار اجرای install پاک نشوند
+$preservedEnv = @()
+if (Test-Path $envPath) {
+  foreach ($line in (Get-Content $envPath)) {
+    $t = $line.Trim()
+    if ($t -eq '' -or $t.StartsWith('#')) {
+      if ($t -ne '# ---- manual settings (kept by install) ----') { $preservedEnv += $line }
+      continue
+    }
+    $kv = $t -split '=', 2
+    if ($kv.Count -eq 2 -and $kv[0].Trim() -match '^[A-Za-z_][A-Za-z0-9_]*$' -and -not $envMap.Contains($kv[0].Trim())) {
+      $preservedEnv += $line
+    }
+  }
+}
+$lines = @(foreach ($k in $envMap.Keys) { "$k=$($envMap[$k])" })
+if ($preservedEnv.Count -gt 0) {
+  $lines += '# ---- manual settings (kept by install) ----'
+  $lines += $preservedEnv
+}
 [System.IO.File]::WriteAllLines($envPath, $lines)
-$cmdLines = foreach ($k in $envMap.Keys) { 'set "' + $k + '=' + $envMap[$k] + '"' }
+$cmdLines = @(foreach ($k in $envMap.Keys) { 'set "' + $k + '=' + $envMap[$k] + '"' })
+foreach ($pline in $preservedEnv) {
+  $pt = $pline.Trim()
+  if ($pt -eq '') { continue }
+  if ($pt.StartsWith('#')) { $cmdLines += ('rem ' + $pt.TrimStart('#').Trim()); continue }
+  $pkv = $pt -split '=', 2
+  if ($pkv.Count -eq 2 -and $pkv[0].Trim() -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+    $cmdLines += ('set "' + $pkv[0].Trim() + '=' + $pkv[1] + '"')
+  }
+}
 [System.IO.File]::WriteAllLines("$stack\rose-backend-env.cmd", $cmdLines)
 Write-Host ("   نوشته شد: " + $envPath)
+if ($preservedEnv.Count -gt 0) { Write-Host ('   حفظ شد: ' + $preservedEnv.Count + ' خط تنظیمات دستی env') }
 
 # بارگذاری env در این نشست
 foreach ($k in $envMap.Keys) { Set-Item -Path ("env:" + $k) -Value $envMap[$k] }
+foreach ($pline in $preservedEnv) {
+  $pt = $pline.Trim()
+  if ($pt -eq '' -or $pt.StartsWith('#')) { continue }
+  $pkv = $pt -split '=', 2
+  if ($pkv.Count -eq 2 -and $pkv[0].Trim() -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+    Set-Item -Path ('env:' + $pkv[0].Trim()) -Value $pkv[1]
+  }
+}
 
 # ------------------------------------------------- ۴) venv و وابستگی‌ها ------
 Write-Host '-- ۴/۷ ساخت venv و نصب وابستگی‌های بک‌اند (چند دقیقه) --' -ForegroundColor Yellow
