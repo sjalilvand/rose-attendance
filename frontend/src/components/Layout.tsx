@@ -19,7 +19,7 @@ interface Tab {
 
 export default function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
-  const { me } = useAuth()
+  const { me, logout } = useAuth()
   const isManager = Boolean(me && me.roles.some((role) => MANAGER_ROLES.includes(role)))
   const isHrAdmin = Boolean(me && me.roles.some((role) => HR_ROLES.includes(role)))
   const [toast, setToast] = useState<LiveNotification | null>(null)
@@ -98,7 +98,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           <button
             className="linklike"
             onClick={() => {
-              navigate('/login')
+              logout()
+              navigate('/login', { replace: true })
             }}
           >
             خروج
