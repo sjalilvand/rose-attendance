@@ -18,6 +18,14 @@ export default function LoginPage() {
       .catch(() => setSso({ enabled: false, label: '' }))
   }, [])
 
+  // بازگشت ناموفق از رز هاب (index.html با ?sso_error=1 برمی‌گرداند)
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('sso_error')) {
+      setError('ورود یکپارچه با رز هاب ناموفق بود؛ لطفاً از ابتدا تلاش کنید یا با گذرواژه وارد شوید.')
+      window.history.replaceState(null, '', '/login')
+    }
+  }, [])
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)

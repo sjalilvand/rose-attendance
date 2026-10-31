@@ -2,12 +2,23 @@
 
 پروتکل نسخه پایه (BASIC) طبق «docs/sso-integration-fa.md» در مخزن رز هاب:
 رز هاب کاربرِ احرازهویت‌شده را با ``?sso_token=<JWT HS256>`` به این سامانه
-برمی‌گرداند. توکن با clientSecret اختصاصی سامانه (rose-techno-8a4e1f) امضا
-شده، اعتبار ۵ دقیقه دارد و فقط یک‌بار باید مصرف شود. پس از اعتبارسنجی،
+برمی‌گرداند. توکن با clientSecret اختصاصی سامانه امضا شده، اعتبار محدود دارد
+و فقط یک‌بار باید مصرف شود (الان سمت سرور هم تضمین می‌شود). پس از اعتبارسنجی،
 حساب کاربر پیدا یا ساخته شده و جفت‌توکن SimpleJWT صادر می‌شود — یعنی کاربر
 با همان هویت رز هاب و بدون گذرواژه جداگانه وارد سامانه حضور و غیاب می‌شود.
 
 مسیر: ``GET/POST /api/v1/auth/rose-sso/``
+
+بازبینی امنیتی (۱۴۰۵/۰۸):
+- clientSecret از تنظیمات/متغیر محیطی خوانده می‌شود (ROSE_HUB_CLIENT_SECRET)
+  و دیگر هاردکد نیست؛ مقدار پیش‌فرض برای سازگاری با استقرار فعلی حفظ شده.
+- یک‌بارمصرف‌بودن توکن سمت سرور تضمین شده (جدول sso_used_tokens + هش SHA-256).
+- نگاشت هویت پایدار شد: نخست جدول sso_identities (provider=rose-hub,
+  subject=ایمیل) بررسی می‌شود؛ بعد نام‌کاربری برابر ایمیل کامل، بعد بخش قبل
+  از @ (رفتار قبلی)؛ در نخستین ورود، هویت ثبت می‌شود تا وابسته به نام
+  کاربریِ قابل تغییر نباشد.
+- حساب‌های SSO تازه گذرواژهٔ غیرقابل‌استفاده می‌گیرند (نمیشود با گذرواژه وارد
+  شد) و ثبت نشست دستگاه (sessions) و last_login هم انجام می‌شود.
 
 نکته: حساب SSO بدون پرونده پرسنلی (employee) ساخته می‌شود — مانند کاربران
 سیستمی؛ ورود و مشاهده پروفایل کار می‌کند و اتصال به پرونده پرسنلی توسط
@@ -16,9 +27,8 @@
 
 from __future__ import annotations
 
-import secrets
-
 import jwt
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
@@ -26,11 +36,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
 
-ROSE_HUB_CLIENT_ID = "rose-techno-8a4e1f"
-ROSE_HUB_CLIENT_SECRET = "4b8e2f6a0d1c5e93a7f3b9d1c0e6f428b5a9d3e1c7f5a0b2d8e4c6f0a2b7d139"
-ROSE_HUB_ISSUER = "rose-hub"
+from .models import SSOIdentity, SSOUsedToken
+from .sso import issue_session
+
 CLOCK_LEEWAY_SECONDS = 60
 
 
@@ -44,10 +53,10 @@ def _decode_rose_hub_token(raw: str) -> dict:
     try:
         return jwt.decode(
             raw,
-            ROSE_HUB_CLIENT_SECRET,
+            settings.ROSE_HUB_CLIENT_SECRET,
             algorithms=["HS256"],
-            audience=ROSE_HUB_CLIENT_ID,
-            issuer=ROSE_HUB_ISSUER,
+            audience=settings.ROSE_HUB_CLIENT_ID,
+            issuer=settings.ROSE_HUB_ISSUER,
             leeway=CLOCK_LEEWAY_SECONDS,
         )
     except jwt.PyJWTError:
@@ -65,28 +74,54 @@ def _unique_username(base: str) -> str:
     return candidate
 
 
-def _login_from_rose_hub(raw_token: str) -> dict:
+def _login_from_rose_hub(request: Request, raw_token: str) -> dict:
+    if not SSOUsedToken.try_consume(raw_token, provider=settings.ROSE_HUB_ISSUER):
+        # توکن یک‌بارمصرف است؛ استفادهٔ مجدد (حتی در پنجرهٔ اعتبار) رد می‌شود.
+        raise RoseHubTokenError()
+
     payload = _decode_rose_hub_token(raw_token)
     email = (payload.get("email") or "").strip().lower()
     if not email:
         raise ValidationError({"detail": "توکن ورود یکپارچه فاقد ایمیل است."})
 
     User = get_user_model()
-    # نگاشت پایدار هویت رز هاب به حساب محلی: بخش قبل از @ ایمیل
-    base = email.split("@")[0].replace(" ", "") or "rosehub"
-    user = User.objects.filter(username=base).first()
+    provider = settings.ROSE_HUB_ISSUER
+    user = None
+
+    # ۱) نگاشت پایدار از سابقهٔ ورودهای قبلی
+    identity = (
+        SSOIdentity.objects.filter(provider=provider, subject=email)
+        .select_related("user")
+        .first()
+    )
+    if identity is not None:
+        user = identity.user
     if user is None:
-        user = User.objects.create_user(
-            username=_unique_username(base),
-            password=secrets.token_hex(32),  # گذرواژه تصادفی غیرقابل حدس
-        )
+        # ۲) نام‌کاربری برابر ایمیل کامل (قرارداد حساب‌های سازمانی)
+        user = User.objects.filter(username=email).first()
+    if user is None:
+        # ۳) رفتار قبلی: بخش قبل از @ ایمیل
+        base = email.split("@")[0].replace(" ", "") or "rosehub"
+        user = User.objects.filter(username=base).first()
+    if user is None:
+        # ۴) ساخت حساب تازه — بدون گذرواژهٔ محلی قابل‌استفاده
+        user = User.objects.create_user(username=_unique_username(base), password=None)
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
     if not user.is_active:
         raise ValidationError({"detail": "حساب کاربری شما غیرفعال است."})
 
-    refresh = RefreshToken.for_user(user)
+    # ثبت/به‌روزرسانی هویت پایدار برای ورودهای بعدی
+    if identity is None:
+        SSOIdentity.objects.get_or_create(
+            provider=provider, subject=email,
+            defaults={"user": user, "email": email},
+        )
+
+    access, refresh = issue_session(request, user)
     return {
-        "access": str(refresh.access_token),
-        "refresh": str(refresh),
+        "access": access,
+        "refresh": refresh,
         "username": user.username,
         "via": "rose-hub",
     }
@@ -105,7 +140,7 @@ class RoseSSOView(APIView):
                 {"detail": "پارامتر sso_token الزامی است.", "launch": "rose-hub"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(_login_from_rose_hub(raw))
+        return Response(_login_from_rose_hub(request, raw))
 
     def post(self, request: Request) -> Response:
         raw = (request.data or {}).get("token", "") if isinstance(request.data, dict) else ""
@@ -114,4 +149,4 @@ class RoseSSOView(APIView):
                 {"detail": "فیلد token الزامی است."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(_login_from_rose_hub(raw))
+        return Response(_login_from_rose_hub(request, raw))

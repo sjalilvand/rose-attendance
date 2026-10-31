@@ -172,6 +172,23 @@ SSO_PUBLIC_BASE_URL = os.environ.get("SSO_PUBLIC_BASE_URL", "").strip()
 # Extra PWA origins allowed as post-login redirect targets (comma separated).
 SSO_EXTRA_REDIRECT_ORIGINS = os.environ.get("SSO_EXTRA_REDIRECT_ORIGINS", "").strip()
 
+# ---------------------------------------------------------------------------
+# Rose Hub SSO (پروتکل BASIC رز هاب) — apps/people/rose_sso.py
+# Secret را می‌توان با متغیر محیطی بازنویسی کرد؛ مقدار پیش‌فرض برای سازگاری
+# با استقرار فعلی حفظ شده است (در مخزن عمومی نباید secret واقعی باشد).
+# ---------------------------------------------------------------------------
+ROSE_HUB_CLIENT_ID = os.environ.get("ROSE_HUB_CLIENT_ID", "rose-techno-8a4e1f").strip()
+ROSE_HUB_CLIENT_SECRET = os.environ.get(
+    "ROSE_HUB_CLIENT_SECRET",
+    "4b8e2f6a0d1c5e93a7f3b9d1c0e6f428b5a9d3e1c7f5a0b2d8e4c6f0a2b7d139",
+).strip()
+ROSE_HUB_ISSUER = os.environ.get("ROSE_HUB_ISSUER", "rose-hub").strip()
+# اعتبار توکن یک‌بارمصرف رز هاب (ثانیه) — مطابق سند پروتکل
+try:
+    ROSE_HUB_TOKEN_TTL_SECONDS = int(os.environ.get("ROSE_HUB_TOKEN_TTL_SECONDS", "300"))
+except ValueError:
+    ROSE_HUB_TOKEN_TTL_SECONDS = 300
+
 # Account lockout (users.failed_attempts / locked_until, section 6)
 LOCKOUT_MAX_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15

@@ -264,6 +264,43 @@ class SSOLoginState(models.Model):
         return self.expires_at <= timezone.now()
 
 
+class SSOUsedToken(models.Model):
+    """Registry of consumed one-time SSO tokens (replay protection).
+
+    Stores only the SHA-256 of the raw token, so a leaked DB dump cannot
+    resurrect anything. Rows older than ~15 minutes are swept on access.
+    """
+
+    token_hash = models.CharField(max_length=128, unique=True)
+    provider = models.CharField(max_length=64, default="rose-hub")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "sso_used_tokens"
+        verbose_name = "توکن مصرف‌شدهٔ SSO"
+        verbose_name_plural = "توکن‌های مصرف‌شدهٔ SSO"
+
+    @classmethod
+    def try_consume(cls, raw_token: str, provider: str = "rose-hub") -> bool:
+        """Returns True on first consumption, False if already used."""
+        import hashlib
+
+        from django.db import IntegrityError, transaction
+
+        digest = hashlib.sha256(raw_token.encode()).hexdigest()
+        cls.objects.filter(
+            provider=provider,
+            created_at__lt=timezone.now() - timezone.timedelta(minutes=15),
+        ).delete()
+        try:
+            # atomic داخلی = savepoint؛ خطای یکتایی، تراکنش بیرونی را خراب نمی‌کند
+            with transaction.atomic():
+                cls.objects.create(token_hash=digest, provider=provider)
+            return True
+        except IntegrityError:
+            return False
+
+
 class DeviceSession(TimeStampedModel):
     """Refresh/session registry — retention >= 90 days (section 6)."""
 
