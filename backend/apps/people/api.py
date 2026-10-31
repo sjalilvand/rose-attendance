@@ -108,10 +108,29 @@ class TokenRefreshWithDeviceView(TokenRefreshView):
 class MeView(APIView):
     """GET /api/v1/me/ — profile + roles + branch geo (PWA bootstrapping)."""
 
+    def _self_heal_from_hub(self, user: User) -> None:
+        """خودترمیمی نشست‌های قدیمی — کاربرانی که هیچ مشخصه‌ای از رز هاب
+        نگرفته‌اند (حساب‌های وارد‌شده قبل از استقرار همگام‌سازی)، با اولین
+        فراخوانی /me یک‌بار از رز هاب استعلام می‌شوند تا بدون خروج/ورود مجدد
+        پروفایل‌شان پر شود. تا وقتی مشخصاتی اعمال نشود هر /me یک استعلام
+        loopback سریع می‌زند و پس از پر‌شدن فیلدها دیگر استعلام نمی‌زند.
+        """
+        if user.full_name or user.national_id or user.mobile:
+            return
+        try:
+            from .rose_sso import fetch_and_apply_hub_profile
+
+            profile, _reason = fetch_and_apply_hub_profile(user)
+        except Exception:  # pragma: no cover - /me هرگز به‌خاطر رز هاب نمی‌شکند
+            return
+        if profile:
+            user.refresh_from_db()
+
     def get(self, request):
         from django.db.models import Q
 
         user: User = request.user
+        self._self_heal_from_hub(user)
         employee = user.employee if user.employee_id else None
         today = timezone.localdate()
         branches: list[tuple[object, bool]] = []
@@ -215,18 +234,16 @@ class ProfileSyncFromHubView(APIView):
     throttle_scope = "auth"
 
     def post(self, request):
-        from .rose_sso import fetch_and_apply_hub_profile
+        from .rose_sso import fetch_and_apply_hub_profile, hub_sync_error_message
 
         user: User = request.user
-        profile = fetch_and_apply_hub_profile(user)
+        profile, reason = fetch_and_apply_hub_profile(user)
         if profile is None:
             return Response(
                 {
                     "synced": False,
-                    "detail": (
-                        "استعلام مشخصات از رز هاب ناموفق بود؛ اتصال سرور به رز هاب را "
-                        "بررسی کنید یا بعداً دوباره تلاش کنید."
-                    ),
+                    "reason": reason,
+                    "detail": hub_sync_error_message(reason),
                 },
                 status=status.HTTP_502_BAD_GATEWAY,
             )

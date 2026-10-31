@@ -171,7 +171,8 @@ class RoseSSOProfileTests(TestCase):
             "clinic": "کلینیک رز اصفهان",
         }
         with mock.patch(
-            "apps.people.rose_sso._fetch_rose_hub_profile", return_value=profile
+            "apps.people.rose_sso._fetch_rose_hub_profile_detailed",
+            return_value=(profile, None),
         ):
             r = self.client.post(
                 "/api/v1/auth/token/",
@@ -201,7 +202,8 @@ class RoseSSOProfileTests(TestCase):
         """قطع/در دسترس نبودن رز هاب نباید ورود محلی را خراب کند."""
         User.objects.create_user(username="1282777076", password="test-pass-123")
         with mock.patch(
-            "apps.people.rose_sso._fetch_rose_hub_profile", return_value=None
+            "apps.people.rose_sso._fetch_rose_hub_profile_detailed",
+            return_value=(None, "unreachable"),
         ):
             r_ok = self.client.post(
                 "/api/v1/auth/token/",
@@ -211,7 +213,7 @@ class RoseSSOProfileTests(TestCase):
         self.assertEqual(r_ok.status_code, 200, r_ok.content)
 
         with mock.patch(
-            "apps.people.rose_sso._fetch_rose_hub_profile",
+            "apps.people.rose_sso._fetch_rose_hub_profile_detailed",
             side_effect=RuntimeError("boom"),
         ):
             r_err = self.client.post(
@@ -253,8 +255,8 @@ class ProfileSyncFromHubTests(TestCase):
     def test_syncs_profile_and_returns_visible_result(self):
         user = self._login()
         with mock.patch(
-            "apps.people.rose_sso._fetch_rose_hub_profile",
-            return_value=dict(HUB_PROFILE),
+            "apps.people.rose_sso._fetch_rose_hub_profile_detailed",
+            return_value=(dict(HUB_PROFILE), None),
         ):
             r = self.client.post("/api/v1/auth/profile/sync-from-hub/")
         self.assertEqual(r.status_code, 200, r.content)
@@ -281,12 +283,82 @@ class ProfileSyncFromHubTests(TestCase):
         user.full_name = "مقدار محلی"
         user.save(update_fields=["full_name", "updated_at"])
         with mock.patch(
-            "apps.people.rose_sso._fetch_rose_hub_profile", return_value=None
+            "apps.people.rose_sso._fetch_rose_hub_profile_detailed",
+            return_value=(None, "unreachable"),
         ):
             r = self.client.post("/api/v1/auth/profile/sync-from-hub/")
         self.assertEqual(r.status_code, 502, r.content)
         body = r.json()
         self.assertFalse(body["synced"])
+        self.assertEqual(body["reason"], "unreachable")
         self.assertTrue(body["detail"])
         user = User.objects.get(pk=user.pk)
         self.assertEqual(user.full_name, "مقدار محلی")
+
+    def test_endpoint_maps_failure_reasons_to_persian_messages(self):
+        user = self._login()
+        for reason, fragment in [
+            ("http-401", "clientSecret"),
+            ("not-found", "یافت نشد"),
+            ("config", "ROSE_HUB_URL"),
+        ]:
+            with mock.patch(
+                "apps.people.rose_sso._fetch_rose_hub_profile_detailed",
+                return_value=(None, reason),
+            ):
+                r = self.client.post("/api/v1/auth/profile/sync-from-hub/")
+            self.assertEqual(r.status_code, 502, r.content)
+            body = r.json()
+            self.assertFalse(body["synced"])
+            self.assertEqual(body["reason"], reason)
+            self.assertIn(fragment, body["detail"])
+
+
+class MeSelfHealFromHubTests(TestCase):
+    """خودترمیمی /me — نشست‌های قدیمی (قبل از استقرار همگام‌سازی) بدون
+    خروج/ورود مجدد باید پروفایل رز هاب را بگیرند.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_me_fills_empty_profile_from_hub(self):
+        user = User.objects.create_user(username="1282777076", password="test-pass-123")
+        self.client.force_authenticate(user=user)
+        with mock.patch(
+            "apps.people.rose_sso._fetch_rose_hub_profile_detailed",
+            return_value=(dict(HUB_PROFILE), None),
+        ):
+            me = self.client.get("/api/v1/me/").json()
+        self.assertEqual(me["full_name"], "نرگس عطاران")
+        self.assertEqual(me["mobile"], "09131291153")
+        self.assertEqual(me["national_id"], "1282777076")
+        self.assertEqual(me["province"], "اصفهان")
+        self.assertEqual(me["clinic"], "کلینیک رز اصفهان")
+        user = User.objects.get(username="1282777076")
+        self.assertEqual(user.mobile, "09131291153")
+
+    def test_me_survives_hub_outage(self):
+        user = User.objects.create_user(username="1282777076", password="test-pass-123")
+        self.client.force_authenticate(user=user)
+        with mock.patch(
+            "apps.people.rose_sso._fetch_rose_hub_profile_detailed",
+            return_value=(None, "unreachable"),
+        ):
+            r = self.client.get("/api/v1/me/")
+        self.assertEqual(r.status_code, 200, r.content)
+        # نام به نام‌کاربری برمی‌گردد و پروفایل خالی می‌ماند — بدون خطا
+        self.assertEqual(r.json()["full_name"], "1282777076")
+
+    def test_me_skips_hub_when_profile_already_synced(self):
+        user = User.objects.create_user(username="1282777076", password="test-pass-123")
+        user.full_name = "قبلاً همگام شده"
+        user.save(update_fields=["full_name", "updated_at"])
+        self.client.force_authenticate(user=user)
+        self.addCleanup(mock.patch.stopall)
+        fetch = mock.patch(
+            "apps.people.rose_sso._fetch_rose_hub_profile_detailed"
+        ).start()
+        me = self.client.get("/api/v1/me/").json()
+        self.assertEqual(me["full_name"], "قبلاً همگام شده")
+        fetch.assert_not_called()

@@ -137,17 +137,20 @@ def _sync_sso_profile(user, payload: dict) -> dict:
     return mapping
 
 
-def _fetch_rose_hub_profile(username: str) -> dict | None:
+def _fetch_rose_hub_profile_detailed(username: str) -> tuple[dict | None, str | None]:
     """استعلام مشخصات کاربر از رز هاب (سرویس‌به‌سرویس) — POST /api/sso/profile.
 
-    با clientId/clientSecret اختصاصی همین سامانه احراز می‌شود؛ در صورت
-    در دسترس نبودن رز هاب یا پیدا نشدن کاربر، None برمی‌گردد (هرگز خطا
-    نمی‌اندازد تا ورود محلی به‌خوبی رز هاب کار نکند).
+    با clientId/clientSecret اختصاصی همین سامانه احراز می‌شود؛ خروجی جفت
+    ``(profile, reason)`` است — profile یا مشخصات است یا None و در آن حالت
+    reason علت را می‌گوید: ``config`` (ROSE_HUB_URL خالی)، ``unreachable``
+    (اتصال برقرار نشد)، ``http-401``/``http-xxx`` (رد اعتبارنامه/خطای HTTP)،
+    ``not-found`` (کاربر در رز هاب نیست)، ``bad-payload``. هرگز خطا نمی‌اندازد
+    تا ورود محلی به‌خوبی رز هاب کار نکند.
     """
     base = (getattr(settings, "ROSE_HUB_URL", "") or "").strip().rstrip("/")
     username = (username or "").strip()
     if not base or not username:
-        return None
+        return None, "config"
     body = _json.dumps(
         {
             "clientId": settings.ROSE_HUB_CLIENT_ID,
@@ -161,49 +164,78 @@ def _fetch_rose_hub_profile(username: str) -> dict | None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    # ProxyHandler({}) — اگر روی سرور متغیر http_proxy تنظیم شده باشد،
+    # فراخوانی داخل‌سروری (loopback) نباید از پروکسی عبور کند.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec - آدرس از تنظیمات سرور
+        with opener.open(req, timeout=5) as resp:  # nosec - آدرس از تنظیمات سرور
             payload = _json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # ۴۰۱ یعنی مسیر/اعتبارنامه رد شده (مثلاً میان‌افزار رز هاب مسیر را
-        # نشناسد)؛ ۴۰۴ یعنی کاربر در رز هاب یافت نشد. برای عیب‌یابی ثبت می‌شود.
+        # نشناسد یا clientSecret ناهمسان است)؛ ۴۰۴ یعنی کاربر یافت نشد.
         logger.warning(
             "استعلام پروفایل از رز هاب ناموفق بود (username=%s, HTTP %s)",
             username, exc.code,
         )
-        return None
+        return None, ("http-401" if exc.code in (401, 403) else f"http-{exc.code}")
     except Exception as exc:  # قطعی شبکه، timeout و…
         logger.warning(
             "استعلام پروفایل از رز هاب ناموفق بود (username=%s): %s", username, exc
         )
-        return None
+        return None, "unreachable"
     if not isinstance(payload, dict) or not payload.get("found"):
         logger.info(
             "رز هاب کاربر را برای استعلام پروفایل نیافت (username=%s)", username
         )
-        return None
+        return None, "not-found"
     profile = payload.get("profile")
-    return profile if isinstance(profile, dict) else None
+    if isinstance(profile, dict):
+        return profile, None
+    return None, "bad-payload"
 
 
-def fetch_and_apply_hub_profile(user) -> dict | None:
+def _fetch_rose_hub_profile(username: str) -> dict | None:
+    """نسخهٔ سادهٔ استعلام — فقط profile یا None (برای مسیرهای بی‌صدا)."""
+    return _fetch_rose_hub_profile_detailed(username)[0]
+
+
+HUB_SYNC_ERROR_MESSAGES = {
+    "config": "همگام‌سازی با رز هاب روی این سرور تنظیم نشده است (ROSE_HUB_URL خالی است).",
+    "unreachable": "اتصال سرور به رز هاب برقرار نشد؛ چند لحظه بعد دوباره تلاش کنید.",
+    "http-401": "رز هاب اعتبارنامهٔ این سامانه را نپذیرفت (clientSecret ناهمسان است).",
+    "not-found": "این نام کاربری در رز هاب یافت نشد؛ نام کاربری در دو سامانه باید یکی باشد (کد ملی).",
+    "apply-failed": "اعمال مشخصات دریافتی از رز هاب روی حساب ناموفق بود.",
+    "bad-payload": "پاسخ رز هاب قابل خواندن نبود.",
+}
+
+
+def hub_sync_error_message(reason: str | None) -> str:
+    """پیام فارسیِ قابل‌نمایش برای علت شکست همگام‌سازی."""
+    return HUB_SYNC_ERROR_MESSAGES.get(
+        reason or "", "استعلام مشخصات از رز هاب ناموفق بود؛ بعداً دوباره تلاش کنید."
+    )
+
+
+def fetch_and_apply_hub_profile(user) -> tuple[dict | None, str | None]:
     """استعلام و اعمال مشخصات رز هاب روی حساب کاربر.
 
-    dict مشخصات اعمال‌شده برمی‌گردد؛ در دسترس نبودن رز هاب یا یافت نشدن
-    کاربر → None (تماس‌گیرنده پیام مناسب نشان می‌دهد — خطا هرگز به بیرون
-    نشت نمی‌کند).
+    خروجی ``(profile, reason)``: در موفقیت profile dict مشخصات اعمال‌شده و
+    reason=None است؛ در شکست profile=None و reason علت را می‌گوید. خطا هرگز
+    به بیرون نشت نمی‌کند (ورود/نمایش پروفایل نباید به‌خاطر رز هاب بشکند).
     """
     try:
-        profile = _fetch_rose_hub_profile(getattr(user, "username", "") or "")
+        profile, reason = _fetch_rose_hub_profile_detailed(
+            getattr(user, "username", "") or ""
+        )
     except Exception:  # pragma: no cover - محافظت کامل
-        return None
+        return None, "unreachable"
     if not profile:
-        return None
+        return None, reason or "unreachable"
     try:
         _sync_sso_profile(user, profile)
     except Exception:  # pragma: no cover - همگام‌سازی هرگز نشکند
-        return None
-    return profile
+        return None, "apply-failed"
+    return profile, None
 
 
 def sync_rose_hub_profile_for_user(user) -> bool:
@@ -214,7 +246,8 @@ def sync_rose_hub_profile_for_user(user) -> bool:
     پروندهٔ پرسنلی پیوند‌شده اعمال می‌شود. ناموفق بودن استعلام (قطعی شبکه
     و…) هرگز مانع ورود نمی‌شود.
     """
-    return fetch_and_apply_hub_profile(user) is not None
+    profile, _reason = fetch_and_apply_hub_profile(user)
+    return profile is not None
 
 
 def _login_from_rose_hub(request: Request, raw_token: str) -> dict:
