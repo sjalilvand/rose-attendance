@@ -83,6 +83,17 @@ git pull --ff-only
 
 اگر `git pull` شکست خورد (تغییرات محلی)، محتوا را موقتاً کنار بگذارید: `git stash` و دوباره pull کنید. اگر build تصاویر به دلیل خطای شبکهٔ موقت شکست خورد، کافی است دوباره `.\update.ps1` اجرا کنید؛ لایه‌های کش‌شده سرعت کار را بالا می‌برند.
 
+### ۴.۱ به‌روزرسانی روی استقرار بومی ویندوز (بدون Docker)
+
+اگر سامانه با `install-rose-app.ps1` به‌صورت بومی روی ویندوز نصب شده باشد (سرویس‌های RoseApi/RoseNginx/RoseWorker/RoseBeat/RoseRedis + PostgreSQL بومی، وب ۸۰۸۵ / بک‌اند ۳۰۰۵)، به‌روزرسانی یک‌فرمانی است:
+
+```powershell
+git pull --ff-only
+.\update-rose.ps1
+```
+
+این اسکریپت خودش سه گام را پشت‌سرهم انجام می‌دهد: `git pull --ff-only` ← `install-rose-app.ps1 -SkipFrontend` (نصب وابستگی venv + مهاجرت دیتابیس + جمع‌آوری static) ← `run-rose.ps1 -Restart` و در پایان سلامت API را روی `http://localhost:8085/api/v1/health/` بررسی می‌کند. اگر `frontend/dist` در نسخهٔ جدید تغییر کرده باشد، پیام «Ctrl+Shift+R» نمایش داده می‌شود. سوییچ `.\update-rose.ps1 -SkipPull` برای بازسازی بدون pull موجود است. اگر `git pull` به‌خاطر تغییرات محلی شکست خورد، همان توصیهٔ بالا (git stash) اعتبار دارد.
+
 ## ۵. دامنه، HTTPS و امنیت
 
 برای انتشار واقعی روی دامنه، سه کار لازم است. نخست، در `.env` مقدار `DJANGO_ALLOWED_HOSTS` را به دامنهٔ واقعی تغییر دهید (مثلاً `attendance.example.com,localhost,127.0.0.1`) و `DJANGO_CSRF_TRUSTED_ORIGINS` را با scheme کامل (`https://attendance.example.com`) به‌روز کنید. دوم، گواهی TLS را در مسیر `deploy/tls/` قرار دهید (ساختار و دستورالعمل در همان پوشه آمده است) — پیکربندی nginx گیت‌وی هر دو حالت HTTP و HTTPS را از قبل دارد و بر اساس وجود گواهی، خودش حالت امن را فعال می‌کند. سوم، روی فایروال فقط ۸۰ و ۴۴۳ را باز نگه دارید.
