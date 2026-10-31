@@ -95,6 +95,14 @@ class User(PermissionsMixin, AbstractBaseUser, TimeStampedModel):
     password = models.CharField(max_length=255, db_column="password_hash")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False, help_text="دسترسی پنل ادمین")
+    # فاز ۶۵ — مشخصات منتقل‌شده از رز هاب در ورود یکپارچه (SSO)؛
+    # منبع حقیقت رز هاب است و در هر ورود بروزرسانی می‌شود.
+    full_name = models.CharField(max_length=200, blank=True, help_text="نام و نام خانوادگی (رز هاب)")
+    mobile = models.CharField(max_length=20, blank=True, help_text="موبایل (رز هاب)")
+    national_id = models.CharField(max_length=15, blank=True, help_text="کد ملی — نام کاربری رز هاب")
+    province = models.CharField(max_length=80, blank=True, help_text="استان")
+    province_code = models.CharField(max_length=10, blank=True, help_text="کد استان")
+    clinic = models.CharField(max_length=200, blank=True, help_text="کلینک محل خدمت")
     failed_attempts = models.PositiveIntegerField(
         default=0, validators=[MinValueValidator(0)]
     )

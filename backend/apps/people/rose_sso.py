@@ -74,6 +74,31 @@ def _unique_username(base: str) -> str:
     return candidate
 
 
+def _sync_sso_profile(user, payload: dict) -> dict:
+    """فاز ۶۵ — بروزرسانی مشخصات کامل کاربر از توکن رز هاب.
+
+    رز هاب منبع حقیقت است: نام و نام خانوادگی، موبایل، کد ملی، استان،
+    کد استان و کلینک محل خدمت در هر ورود یکپارچه بروزرسانی می‌شوند؛
+    مقدار خالی توکن یعنی در رز هاب ثبت نشده — مقدار محلی پاک نمی‌شود.
+    """
+    mapping = {
+        "full_name": (payload.get("name") or "").strip()[:200],
+        "mobile": (payload.get("mobile") or "").strip()[:20],
+        "national_id": (payload.get("nationalId") or "").strip()[:15],
+        "province": (payload.get("province") or "").strip()[:80],
+        "province_code": (payload.get("provinceCode") or "").strip()[:10],
+        "clinic": (payload.get("clinic") or "").strip()[:200],
+    }
+    changed = []
+    for field, value in mapping.items():
+        if value and getattr(user, field, "") != value:
+            setattr(user, field, value)
+            changed.append(field)
+    if changed:
+        user.save(update_fields=[*changed, "updated_at"])
+    return mapping
+
+
 def _login_from_rose_hub(request: Request, raw_token: str) -> dict:
     if not SSOUsedToken.try_consume(raw_token, provider=settings.ROSE_HUB_ISSUER):
         # توکن یک‌بارمصرف است؛ استفادهٔ مجدد (حتی در پنجرهٔ اعتبار) رد می‌شود.
@@ -118,11 +143,15 @@ def _login_from_rose_hub(request: Request, raw_token: str) -> dict:
             defaults={"user": user, "email": email},
         )
 
+    # فاز ۶۵: همگام‌سازی پروفایل کامل (نام، موبایل، کد ملی، استان، کلینک)
+    profile = _sync_sso_profile(user, payload)
+
     access, refresh = issue_session(request, user)
     return {
         "access": access,
         "refresh": refresh,
         "username": user.username,
+        "profile": profile,
         "via": "rose-hub",
     }
 
