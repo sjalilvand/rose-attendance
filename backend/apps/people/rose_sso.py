@@ -96,6 +96,37 @@ def _sync_sso_profile(user, payload: dict) -> dict:
             changed.append(field)
     if changed:
         user.save(update_fields=[*changed, "updated_at"])
+
+    # فاز ۶۵ (تکمیل) — پروندهٔ پرسنلی پیوند‌شده نیز از منبع حقیقت رز هاب
+    # بروزرسانی می‌شود؛ چون UI (نوار بالا و صفحهٔ پروفایل) نام و موبایل را
+    # از employee می‌خواند و در غیر این صورت نام قدیمیِ پرونده نمایش
+    # داده می‌شد. نام کامل به نام/نام خانوادگی شکسته می‌شود (نخستین
+    # واژه = نام، باقی = نام خانوادگی) و مقدار خالی توکن مقدار محلی
+    # پرونده را پاک نمی‌کند.
+    employee = getattr(user, "employee", None)
+    if employee is not None:
+        emp_changed = []
+        parts = mapping["full_name"].split()
+        if parts:
+            first_name = parts[0][:80]
+            last_name = " ".join(parts[1:])[:80]
+            if first_name and employee.first_name != first_name:
+                employee.first_name = first_name
+                emp_changed.append("first_name")
+            if last_name and employee.last_name != last_name:
+                employee.last_name = last_name
+                emp_changed.append("last_name")
+        if mapping["mobile"] and employee.mobile != mapping["mobile"]:
+            employee.mobile = mapping["mobile"]
+            emp_changed.append("mobile")
+        if (
+            mapping["national_id"]
+            and employee.national_id != mapping["national_id"][:10]
+        ):
+            employee.national_id = mapping["national_id"][:10]
+            emp_changed.append("national_id")
+        if emp_changed:
+            employee.save(update_fields=[*emp_changed, "updated_at"])
     return mapping
 
 

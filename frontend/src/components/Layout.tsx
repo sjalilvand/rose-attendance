@@ -67,7 +67,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     ...(isHrAdmin ? [{ to: '/management', label: 'مدیریت', icon: '👥' } satisfies Tab] : []),
     { to: '/settings', label: 'تنظیمات', icon: '⚙️' },
   ]
-  const displayName = me?.employee?.full_name ?? me?.username ?? ''
+  // نام نمایشی: اول نام همگام‌شده از رز هاب، بعد پروندهٔ پرسنلی، بعد نام کاربری
+  const displayName = me?.full_name || me?.employee?.full_name || me?.username || ''
   const mainRole = me?.roles.length ? roleFa(me.roles[0]) : ''
   return (
     <div className="app-shell">

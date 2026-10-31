@@ -140,6 +140,17 @@ class MeView(APIView):
             {
                 "username": user.username,
                 "server_time": timezone.now(),
+                # فاز ۶۵ — مشخصات کامل منتقل‌شده از رز هاب (منبع حقیقت)؛
+                # UI از full_name برای نام نمایشی و بقیه را در صفحهٔ پروفایل نشان می‌دهد.
+                "full_name": user.full_name
+                or (employee.full_name if employee is not None else user.username),
+                "mobile": user.mobile
+                or (employee.mobile if employee is not None else ""),
+                "national_id": user.national_id
+                or (employee.national_id if employee is not None else ""),
+                "province": user.province,
+                "province_code": user.province_code,
+                "clinic": user.clinic,
                 "employee": employee_payload,
                 "roles": sorted(
                     set(user.active_role_codes()) | ({"ADMIN"} if user.is_superuser else set())

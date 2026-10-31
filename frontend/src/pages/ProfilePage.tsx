@@ -20,10 +20,13 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (me?.employee?.mobile) setMobile(me.employee.mobile)
-  }, [me?.employee?.mobile])
+    else if (me?.mobile) setMobile(me.mobile)
+  }, [me?.employee?.mobile, me?.mobile])
 
   if (!me) return null
   const isSso = me.auth_method === 'SSO'
+  // نام نمایشی: اول نام همگام‌شده از رز هاب، بعد پروندهٔ پرسنلی
+  const displayName = me.full_name || me.employee?.full_name || me.username
 
   async function saveMobile(e: React.FormEvent) {
     e.preventDefault()
@@ -64,9 +67,9 @@ export default function ProfilePage() {
   return (
     <div className="page">
       <section className="card profile-head">
-        <span className="avatar big" aria-hidden>{initials(me.employee?.full_name ?? me.username)}</span>
+        <span className="avatar big" aria-hidden>{initials(displayName)}</span>
         <div>
-          <h1 className="h3">{me.employee?.full_name ?? me.username}</h1>
+          <h1 className="h3">{displayName}</h1>
           <p className="hint">
             {rolesFa(me.roles) || '—'}
             {me.employee?.home_branch_name ? ` — ${me.employee.home_branch_name}` : ''}
@@ -79,6 +82,18 @@ export default function ProfilePage() {
         <dl className="kv">
           <dt>نام کاربری</dt>
           <dd className="mono">{me.username}</dd>
+          <dt>نام و نام خانوادگی</dt>
+          <dd>{displayName || '—'}</dd>
+          <dt>کد ملی</dt>
+          <dd className="mono">{me.national_id || '—'}</dd>
+          <dt>موبایل (رز هاب)</dt>
+          <dd className="mono">{me.mobile || me.employee?.mobile || '—'}</dd>
+          <dt>استان</dt>
+          <dd>{me.province || '—'}</dd>
+          <dt>کد استان</dt>
+          <dd className="mono">{me.province_code || '—'}</dd>
+          <dt>کلینک محل خدمت</dt>
+          <dd>{me.clinic || '—'}</dd>
           <dt>کد پرسنلی</dt>
           <dd className="mono">{me.employee ? faDigits(me.employee.personnel_code) : '—'}</dd>
           <dt>عنوان شغلی</dt>

@@ -121,6 +121,13 @@ export interface BranchInfo {
 export interface MeInfo {
   username: string
   server_time: string
+  /** فاز ۶۵ — مشخصات کامل همگام‌شده از رز هاب (در هر ورود SSO بروزرسانی می‌شود) */
+  full_name?: string
+  mobile?: string
+  national_id?: string
+  province?: string
+  province_code?: string
+  clinic?: string
   /** null برای کاربران سیستمی مثل superuser که پروندهٔ پرسنلی ندارند */
   employee: {
     id: number
