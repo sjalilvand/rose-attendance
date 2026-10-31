@@ -203,6 +203,49 @@ class ProfileUpdateView(APIView):
         return Response({"detail": "شمارهٔ موبایل به‌روزرسانی شد.", "mobile": mobile})
 
 
+class ProfileSyncFromHubView(APIView):
+    """POST /api/v1/auth/profile/sync-from-hub/ — استعلام دوبارهٔ مشخصات از رز هاب.
+
+    کاربرِ وارد‌شده (SSO یا گذرواژه) می‌تواند بدون خروج/ورود مجدد، مشخصات
+    کامل خود را (نام، موبایل، کد ملی، استان، کد استان، کلینک) از رز هاب
+    استعلام و روی حسابش اعمال کند؛ نتیجه با پیام فارسی برگردانده می‌شود تا
+    در UI قابل نمایش باشد (به‌جای همگام‌سازی بی‌صدا در ورود).
+    """
+
+    throttle_scope = "auth"
+
+    def post(self, request):
+        from .rose_sso import fetch_and_apply_hub_profile
+
+        user: User = request.user
+        profile = fetch_and_apply_hub_profile(user)
+        if profile is None:
+            return Response(
+                {
+                    "synced": False,
+                    "detail": (
+                        "استعلام مشخصات از رز هاب ناموفق بود؛ اتصال سرور به رز هاب را "
+                        "بررسی کنید یا بعداً دوباره تلاش کنید."
+                    ),
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(
+            {
+                "synced": True,
+                "detail": "مشخصات شما از رز هاب به‌روزرسانی شد.",
+                "profile": {
+                    "full_name": profile.get("name") or "",
+                    "mobile": profile.get("mobile") or "",
+                    "national_id": profile.get("national_id") or "",
+                    "province": profile.get("province") or "",
+                    "province_code": profile.get("province_code") or "",
+                    "clinic": profile.get("clinic") or "",
+                },
+            }
+        )
+
+
 class PasswordChangeView(APIView):
     """POST /api/v1/auth/password/change/ — self-service password rotation."""
 

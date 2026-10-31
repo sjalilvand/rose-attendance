@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { changePassword, updateMobile } from '../lib/api'
+import { changePassword, syncProfileFromHub, updateMobile } from '../lib/api'
 import { faDigits, formatJalaliDateTime } from '../lib/jalali'
 import { initials, rolesFa } from '../lib/roles'
 
@@ -10,6 +10,10 @@ export default function ProfilePage() {
   const [mobileBusy, setMobileBusy] = useState(false)
   const [mobileMsg, setMobileMsg] = useState<string | null>(null)
   const [mobileErr, setMobileErr] = useState<string | null>(null)
+
+  const [hubBusy, setHubBusy] = useState(false)
+  const [hubMsg, setHubMsg] = useState<string | null>(null)
+  const [hubErr, setHubErr] = useState<string | null>(null)
 
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
@@ -40,6 +44,24 @@ export default function ProfilePage() {
       setMobileErr(err instanceof Error ? err.message : 'به‌روزرسانی ناموفق بود.')
     } finally {
       setMobileBusy(false)
+    }
+  }
+
+  // مشخصات رز هاب منبع حقیقت است؛ با این دکمه بدون خروج/ورود مجدد همه‌چیز
+  // از رز هاب استعلام و روی حساب اعمال می‌شود (نتیجه با پیام نمایش داده می‌شود).
+  async function syncFromHub() {
+    setHubBusy(true)
+    setHubMsg(null)
+    setHubErr(null)
+    try {
+      const res = await syncProfileFromHub()
+      if (res.synced) setHubMsg(res.detail)
+      else setHubErr(res.detail)
+      await refreshMe()
+    } catch (err) {
+      setHubErr(err instanceof Error ? err.message : 'استعلام از رز هاب ناموفق بود.')
+    } finally {
+      setHubBusy(false)
     }
   }
 
@@ -78,7 +100,14 @@ export default function ProfilePage() {
       </section>
 
       <section className="card">
-        <h2 className="h3">مشخصات من</h2>
+        <div className="row between" style={{ alignItems: 'center' }}>
+          <h2 className="h3">مشخصات من</h2>
+          <button className="btn ghost" onClick={syncFromHub} disabled={hubBusy} type="button">
+            {hubBusy ? 'در حال استعلام…' : 'به‌روزرسانی از رز هاب'}
+          </button>
+        </div>
+        {hubMsg && <div className="banner">{hubMsg}</div>}
+        {hubErr && <div className="banner danger">{hubErr}</div>}
         <dl className="kv">
           <dt>نام کاربری</dt>
           <dd className="mono">{me.username}</dd>

@@ -28,6 +28,8 @@
 from __future__ import annotations
 
 import json as _json
+import logging
+import urllib.error
 import urllib.request
 
 import jwt
@@ -44,6 +46,8 @@ from .models import SSOIdentity, SSOUsedToken
 from .sso import issue_session
 
 CLOCK_LEEWAY_SECONDS = 60
+
+logger = logging.getLogger(__name__)
 
 
 class RoseHubTokenError(APIException):
@@ -160,12 +164,46 @@ def _fetch_rose_hub_profile(username: str) -> dict | None:
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:  # nosec - آدرس از تنظیمات سرور
             payload = _json.loads(resp.read().decode("utf-8"))
-    except Exception:
+    except urllib.error.HTTPError as exc:
+        # ۴۰۱ یعنی مسیر/اعتبارنامه رد شده (مثلاً میان‌افزار رز هاب مسیر را
+        # نشناسد)؛ ۴۰۴ یعنی کاربر در رز هاب یافت نشد. برای عیب‌یابی ثبت می‌شود.
+        logger.warning(
+            "استعلام پروفایل از رز هاب ناموفق بود (username=%s, HTTP %s)",
+            username, exc.code,
+        )
+        return None
+    except Exception as exc:  # قطعی شبکه، timeout و…
+        logger.warning(
+            "استعلام پروفایل از رز هاب ناموفق بود (username=%s): %s", username, exc
+        )
         return None
     if not isinstance(payload, dict) or not payload.get("found"):
+        logger.info(
+            "رز هاب کاربر را برای استعلام پروفایل نیافت (username=%s)", username
+        )
         return None
     profile = payload.get("profile")
     return profile if isinstance(profile, dict) else None
+
+
+def fetch_and_apply_hub_profile(user) -> dict | None:
+    """استعلام و اعمال مشخصات رز هاب روی حساب کاربر.
+
+    dict مشخصات اعمال‌شده برمی‌گردد؛ در دسترس نبودن رز هاب یا یافت نشدن
+    کاربر → None (تماس‌گیرنده پیام مناسب نشان می‌دهد — خطا هرگز به بیرون
+    نشت نمی‌کند).
+    """
+    try:
+        profile = _fetch_rose_hub_profile(getattr(user, "username", "") or "")
+    except Exception:  # pragma: no cover - محافظت کامل
+        return None
+    if not profile:
+        return None
+    try:
+        _sync_sso_profile(user, profile)
+    except Exception:  # pragma: no cover - همگام‌سازی هرگز نشکند
+        return None
+    return profile
 
 
 def sync_rose_hub_profile_for_user(user) -> bool:
@@ -176,17 +214,7 @@ def sync_rose_hub_profile_for_user(user) -> bool:
     پروندهٔ پرسنلی پیوند‌شده اعمال می‌شود. ناموفق بودن استعلام (قطعی شبکه
     و…) هرگز مانع ورود نمی‌شود.
     """
-    try:
-        profile = _fetch_rose_hub_profile(getattr(user, "username", "") or "")
-    except Exception:  # pragma: no cover - محافظت کامل
-        return False
-    if not profile:
-        return False
-    try:
-        _sync_sso_profile(user, profile)
-    except Exception:  # pragma: no cover - همگام‌سازی هرگز ورود را نشکند
-        return False
-    return True
+    return fetch_and_apply_hub_profile(user) is not None
 
 
 def _login_from_rose_hub(request: Request, raw_token: str) -> dict:

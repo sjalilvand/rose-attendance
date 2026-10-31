@@ -280,6 +280,16 @@ export async function updateMobile(mobile: string): Promise<string> {
   return res.detail
 }
 
+export interface HubSyncResult {
+  synced: boolean
+  detail: string
+}
+
+/** استعلام دوبارهٔ مشخصات از رز هاب — بدون خروج/ورود مجدد. */
+export async function syncProfileFromHub(): Promise<HubSyncResult> {
+  return apiFetch<HubSyncResult>('/auth/profile/sync-from-hub/', { method: 'POST' })
+}
+
 export function fetchMe(): Promise<MeInfo> {
   return apiFetch<MeInfo>('/me/')
 }

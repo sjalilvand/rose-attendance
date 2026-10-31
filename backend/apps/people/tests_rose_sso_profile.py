@@ -220,3 +220,73 @@ class RoseSSOProfileTests(TestCase):
                 format="json",
             )
         self.assertEqual(r_err.status_code, 200, r_err.content)
+
+
+HUB_PROFILE = {
+    "email": "1282777076@rose.ir",
+    "name": "نرگس عطاران",
+    "role": "THERAPIST",
+    "username": "1282777076",
+    "nationalId": "1282777076",
+    "mobile": "09131291153",
+    "province": "اصفهان",
+    "provinceCode": "009007",
+    "clinic": "کلینیک رز اصفهان",
+}
+
+
+class ProfileSyncFromHubTests(TestCase):
+    """POST /api/v1/auth/profile/sync-from-hub/ — استعلام دستی مشخصات از رز هاب.
+
+    سناریوی گزارش‌شده: نشست‌های موجود (بدون خروج/ورود مجدد) باید بتوانند
+    مشخصات رز هاب را یک‌جا و با پیام قابل‌نمایش به‌روز کنند.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _login(self):
+        user = User.objects.create_user(username="1282777076", password="test-pass-123")
+        self.client.force_authenticate(user=user)
+        return user
+
+    def test_syncs_profile_and_returns_visible_result(self):
+        user = self._login()
+        with mock.patch(
+            "apps.people.rose_sso._fetch_rose_hub_profile",
+            return_value=dict(HUB_PROFILE),
+        ):
+            r = self.client.post("/api/v1/auth/profile/sync-from-hub/")
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertTrue(body["synced"])
+        self.assertTrue(body["detail"])
+        self.assertEqual(body["profile"]["full_name"], "نرگس عطاران")
+        self.assertEqual(body["profile"]["clinic"], "کلینیک رز اصفهان")
+
+        user = User.objects.get(pk=user.pk)
+        self.assertEqual(user.full_name, "نرگس عطاران")
+        self.assertEqual(user.mobile, "09131291153")
+        self.assertEqual(user.province, "اصفهان")
+        self.assertEqual(user.province_code, "009007")
+        self.assertEqual(user.clinic, "کلینیک رز اصفهان")
+
+        # /me هم پس از همگام‌سازی دستی پروفایل کامل را می‌دهد
+        me = self.client.get("/api/v1/me/").json()
+        self.assertEqual(me["full_name"], "نرگس عطاران")
+        self.assertEqual(me["clinic"], "کلینیک رز اصفهان")
+
+    def test_reports_failure_without_touching_local_values(self):
+        user = self._login()
+        user.full_name = "مقدار محلی"
+        user.save(update_fields=["full_name", "updated_at"])
+        with mock.patch(
+            "apps.people.rose_sso._fetch_rose_hub_profile", return_value=None
+        ):
+            r = self.client.post("/api/v1/auth/profile/sync-from-hub/")
+        self.assertEqual(r.status_code, 502, r.content)
+        body = r.json()
+        self.assertFalse(body["synced"])
+        self.assertTrue(body["detail"])
+        user = User.objects.get(pk=user.pk)
+        self.assertEqual(user.full_name, "مقدار محلی")
