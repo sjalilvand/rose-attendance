@@ -1,7 +1,7 @@
 /** مدیریت پرسنل و کاربران — خارج از پنل ادمین؛ فقط HR/ADMIN/superuser.
  * ایجاد پروندهٔ پرسنلی، ساخت/اتصال حساب کاربری، ریست رمز، فعال/غیرفعال
  * و تولید دادهٔ نمونه برای تست ورود. */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import {
   ApiError,
@@ -10,10 +10,12 @@ import {
   fetchMgmtPersonnel,
   fetchMgmtUsers,
   fetchOrgBranches,
+  importAccountsExcel,
   seedDemoPersonnel,
   setMgmtUserPassword,
   updateMgmtPersonnel,
   updateMgmtUser,
+  type AccountImportReport,
   type MgmtPersonnelRow,
   type MgmtUserRow,
   type OrgBranch,
@@ -93,6 +95,10 @@ export default function ManagementPage() {
   const [seedCount, setSeedCount] = useState('30')
   const [seedPw, setSeedPw] = useState('Rose#1404')
   const [seedReport, setSeedReport] = useState<SeedDemoReport | null>(null)
+
+  const importFileRef = useRef<HTMLInputElement>(null)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importReport, setImportReport] = useState<AccountImportReport | null>(null)
 
   const load = useCallback(async (search: string) => {
     setBusy(true)
@@ -255,6 +261,33 @@ export default function ManagementPage() {
     }
   }
 
+  async function runImport(dryRun: boolean) {
+    if (!importFile) return
+    setBusy(true)
+    setErr(null)
+    setMsg(null)
+    try {
+      const report = await importAccountsExcel(importFile, dryRun)
+      setImportReport(report)
+      if (dryRun) {
+        setMsg(
+          `بررسی اولیه انجام شد: ${faDigits(report.created)} ردیف قابل ثبت، ${faDigits(report.errors)} خطا، ${faDigits(report.duplicates)} تکراری. برای ثبت نهایی دکمهٔ «ثبت گروهی» را بزنید.`,
+        )
+      } else {
+        setMsg(
+          `${faDigits(report.created)} حساب کاربری ساخته شد — نام کاربری = کد ملی، گذرواژه = شماره موبایل.`,
+        )
+        setImportFile(null)
+        if (importFileRef.current) importFileRef.current.value = ''
+        await load(q)
+      }
+    } catch (e) {
+      setErr(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const orphans = users.filter((u) => u.employee === null)
 
   return (
@@ -402,6 +435,116 @@ export default function ManagementPage() {
           </div>
         </section>
       )}
+
+      <section className="card">
+        <div className="h">ورود گروهی از فایل اکسل (ساخت حساب کاربری)</div>
+        <p className="hint">
+          فایل اکسل (xlsx) را انتخاب کنید؛ نام کاربری هر نفر = <b>کد ملی</b> و گذرواژه ={' '}
+          <b>شماره موبایل</b> می‌شود. ستون‌های شناسایی‌شده: «نام و نام خانوادگی»، «کد ملی»، «شماره
+          تماس/موبایل» (اختیاری: «کد تفضیلی»، «استان»). ارقام فارسی هم پذیرفته می‌شود و ردیف‌های
+          تکراری دست‌نخورده رد می‌شوند. اول «بررسی اولیه» را بزنید، بعد «ثبت گروهی».
+        </p>
+        <div className="row-inline">
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".xlsx,.xlsm"
+            onChange={(e) => {
+              setImportFile(e.target.files?.[0] ?? null)
+              setImportReport(null)
+            }}
+          />
+          <button
+            className="btn ghost"
+            disabled={busy || !importFile}
+            onClick={() => void runImport(true)}
+          >
+            بررسی اولیه (بدون ثبت)
+          </button>
+          <button
+            className="btn primary"
+            disabled={busy || !importFile}
+            onClick={() => void runImport(false)}
+          >
+            ثبت گروهی
+          </button>
+        </div>
+        {importReport && (
+          <div>
+            <div className="stat-chips">
+              <span className="chip">مجموع ردیف‌ها: {faDigits(importReport.total)}</span>
+              <span className="chip chip-ok">
+                {importReport.dry_run ? 'قابل ثبت: ' : 'ساخته‌شده: '}
+                {faDigits(importReport.created)}
+              </span>
+              {importReport.duplicates > 0 && (
+                <span className="chip chip-warn">تکراری: {faDigits(importReport.duplicates)}</span>
+              )}
+              {importReport.errors > 0 && (
+                <span className="chip chip-danger">خطا: {faDigits(importReport.errors)}</span>
+              )}
+              <span className="chip chip-info">
+                شعبه: {importReport.branch.code} — {importReport.branch.name}
+              </span>
+              {importReport.dry_run && <span className="chip chip-muted">حالت بررسی — چیزی ثبت نشد</span>}
+            </div>
+            {importReport.errors_detail.length > 0 && (
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>سطر</th>
+                      <th>نام</th>
+                      <th>کد ملی</th>
+                      <th>خطا</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importReport.errors_detail.map((e) => (
+                      <tr key={`e${e.row}`}>
+                        <td>{faDigits(String(e.row))}</td>
+                        <td>{e.name}</td>
+                        <td>{e.national_id || '—'}</td>
+                        <td>{e.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {importReport.duplicates_detail.length > 0 && (
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>سطر</th>
+                      <th>نام</th>
+                      <th>کد ملی</th>
+                      <th>تکراری</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importReport.duplicates_detail.map((d) => (
+                      <tr key={`d${d.row}`}>
+                        <td>{faDigits(String(d.row))}</td>
+                        <td>{d.name}</td>
+                        <td>{d.national_id || '—'}</td>
+                        <td>{d.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {importReport.created_sample.length > 0 && (
+              <p className="hint">
+                نمونه: {importReport.created_sample.slice(0, 5).map((s) => `${s.full_name} (${s.username})`).join('، ')}
+                {importReport.created_sample.length > 5 ? ' …' : ''}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="card">
         <div className="h">ساخت سریع پرسنل نمونه برای تست ورود</div>

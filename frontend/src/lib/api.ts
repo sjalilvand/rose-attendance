@@ -76,7 +76,9 @@ function ensureRefreshed(): Promise<boolean> {
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(init.headers)
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
   const token = getAccessToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
   let res: Response
@@ -1096,4 +1098,33 @@ export function seedDemoPersonnel(count: number, password: string): Promise<Seed
     method: 'POST',
     body: JSON.stringify({ count, password }),
   })
+}
+
+// Bulk account import — Excel upload (username = کد ملی, password = موبایل)
+export interface AccountImportRowIssue {
+  row: number
+  name: string
+  national_id: string
+  message: string
+}
+
+export interface AccountImportReport {
+  total: number
+  created: number
+  duplicates: number
+  errors: number
+  dry_run: boolean
+  branch: { code: string; name: string }
+  rule: { username: string; password: string }
+  job_title: string
+  errors_detail: AccountImportRowIssue[]
+  duplicates_detail: AccountImportRowIssue[]
+  created_sample: { row: number; username: string; full_name: string; mobile: string }[]
+}
+
+export function importAccountsExcel(file: File, dryRun: boolean): Promise<AccountImportReport> {
+  const form = new FormData()
+  form.append('file', file)
+  if (dryRun) form.append('dry_run', 'true')
+  return apiFetch('/management/personnel/import-accounts/', { method: 'POST', body: form })
 }

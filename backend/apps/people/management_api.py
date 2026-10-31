@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 from apps.core.enums import EmploymentStatus
 from apps.orgs.models import Branch, Region
 
+from .account_importer import AccountImportFormatError, import_accounts
 from .models import Employee, User
 
 DEMO_PASSWORD_DEFAULT = "Rose#1404"
@@ -362,6 +363,29 @@ class ManagementUserSetPassword(APIView):
         user.is_active = True
         user.save()
         return Response({"detail": f"گذرواژهٔ «{user.username}» عوض شد.", "username": user.username})
+
+
+class ManagementPersonnelImportAccounts(APIView):
+    """POST /api/v1/management/personnel/import-accounts/ — ورود گروهی اکسل + ساخت حساب.
+
+    multipart: file (xlsx) و dry_run (اختیاری). نام کاربری = کد ملی،
+    گذرواژه = شماره موبایل؛ دسترسی هم‌ارز بقیهٔ صفحات مدیریت (HR/ADMIN/superuser).
+    """
+
+    permission_classes = [IsAuthenticated, IsPeopleManager]
+    throttle_scope = "import"
+
+    def post(self, request):
+        upload = request.FILES.get("file")
+        if upload is None:
+            return _bad("فایل xlsx الزامی است.", "INVALID")
+        dry_run = str(request.data.get("dry_run", "")).lower() in ("1", "true", "yes")
+        job_title = str(request.data.get("job_title") or "مشاور").strip()[:120] or "مشاور"
+        try:
+            report = import_accounts(upload.read(), dry_run=dry_run, job_title=job_title)
+        except AccountImportFormatError as exc:
+            return _bad(str(exc), "INVALID_FORMAT")
+        return Response(report)
 
 
 class ManagementSeedDemoView(APIView):

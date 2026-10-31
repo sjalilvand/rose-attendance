@@ -22,6 +22,7 @@ from apps.orgs.api import BranchViewSet, RegionViewSet
 from apps.people.management_api import (
     ManagementPersonnelCreateUserView,
     ManagementPersonnelDetail,
+    ManagementPersonnelImportAccounts,
     ManagementPersonnelListCreate,
     ManagementSeedDemoView,
     ManagementUserDetail,
@@ -103,6 +104,7 @@ api_v1 = [
     path("management/users/", ManagementUsersList.as_view(), name="mgmt-users"),
     path("management/users/<int:user_id>/", ManagementUserDetail.as_view(), name="mgmt-user-detail"),
     path("management/users/<int:user_id>/set-password/", ManagementUserSetPassword.as_view(), name="mgmt-user-password"),
+    path("management/personnel/import-accounts/", ManagementPersonnelImportAccounts.as_view(), name="mgmt-personnel-import-accounts"),
     path("management/seed-demo/", ManagementSeedDemoView.as_view(), name="mgmt-seed-demo"),
 ]
 
