@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import re
 
 from django.conf import settings
+from django.contrib.auth.password_validation import validate_password
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -125,6 +127,11 @@ class MeView(APIView):
                 "full_name": employee.full_name,
                 "employment_status": employee.employment_status,
                 "home_branch_id": employee.home_branch_id,
+                "home_branch_name": (
+                    employee.home_branch.name if employee.home_branch_id else None
+                ),
+                "job_title": employee.job_title,
+                "mobile": employee.mobile,
             }
             if employee is not None
             else None
@@ -137,6 +144,8 @@ class MeView(APIView):
                 "roles": sorted(
                     set(user.active_role_codes()) | ({"ADMIN"} if user.is_superuser else set())
                 ),
+                "auth_method": "SSO" if not user.has_usable_password() or user.sso_identities.exists() else "PASSWORD",
+                "last_login_at": user.last_login,
                 "branches": [
                     {
                         "id": branch.id,
@@ -151,6 +160,69 @@ class MeView(APIView):
                 ],
             }
         )
+
+
+MOBILE_RE = re.compile(r"^09\d{9}$")
+
+
+class ProfileUpdateView(APIView):
+    """POST /api/v1/auth/profile/ — an employee edits their own mobile number."""
+
+    def post(self, request):
+        user: User = request.user
+        if user.employee_id is None:
+            return Response(
+                {"detail": "پروندهٔ پرسنلی برای این حساب وجود ندارد.", "code": "NO_EMPLOYEE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        mobile = str(request.data.get("mobile", "") or "").strip()
+        if mobile and not MOBILE_RE.fullmatch(mobile):
+            return Response(
+                {"detail": "شمارهٔ موبایل باید ۱۱ رقم و با ۰۹ شروع شود.", "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        employee = user.employee
+        employee.mobile = mobile
+        employee.save(update_fields=["mobile", "updated_at"])
+        return Response({"detail": "شمارهٔ موبایل به‌روزرسانی شد.", "mobile": mobile})
+
+
+class PasswordChangeView(APIView):
+    """POST /api/v1/auth/password/change/ — self-service password rotation."""
+
+    throttle_scope = "auth"
+
+    def post(self, request):
+        user: User = request.user
+        current = str(request.data.get("current_password", "") or "")
+        new = str(request.data.get("new_password", "") or "")
+        if not user.has_usable_password():
+            return Response(
+                {"detail": "ورود شما از طریق SSO است و گذرواژهٔ محلی ندارید.", "code": "SSO_ONLY"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not current or not user.check_password(current):
+            return Response(
+                {"detail": "گذرواژهٔ فعلی نادرست است.", "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if current == new:
+            return Response(
+                {"detail": "گذرواژهٔ جدید نباید با گذرواژهٔ فعلی یکسان باشد.", "code": "INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            validate_password(new, user=user)
+        except Exception:
+            return Response(
+                {"detail": "گذرواژهٔ جدید مناسب نیست؛ حداقل ۸ نویسه و غیرقابل حدس باشد.", "code": "WEAK"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.set_password(new)
+        user.failed_attempts = 0
+        user.locked_until = None
+        user.save(update_fields=["password", "failed_attempts", "locked_until", "updated_at"])
+        return Response({"detail": "گذرواژه با موفقیت تغییر کرد."})
 
 
 # ---------------------------------------------------------------------------

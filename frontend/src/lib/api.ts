@@ -130,8 +130,14 @@ export interface MeInfo {
     full_name: string
     employment_status: string
     home_branch_id: number | null
+    home_branch_name?: string | null
+    job_title?: string
+    mobile?: string
   } | null
   roles: string[]
+  /** روش ورود — SSO یا گذرواژه محلی (فیلد جدید؛ در نسخه‌های قبلی ارسال نمی‌شد) */
+  auth_method?: 'SSO' | 'PASSWORD'
+  last_login_at?: string | null
   branches: BranchInfo[]
 }
 
@@ -229,6 +235,40 @@ export async function login(username: string, password: string): Promise<TokenRe
 
 export async function logout(): Promise<void> {
   clearTokens()
+}
+
+// ---------------------------------------------------------------------------
+// SSO (ورود یکپارچه) + پروفایل
+// ---------------------------------------------------------------------------
+export interface SsoStatus {
+  enabled: boolean
+  label: string
+}
+
+export function fetchSsoStatus(): Promise<SsoStatus> {
+  return apiFetch<SsoStatus>('/auth/sso/status/')
+}
+
+/** آدرس شروع ورود یکپارچه — مرورگر مستقیم به سرور می‌رود تا به ارائه‌دهنده ریدایرکت شود. */
+export function ssoLoginUrl(): string {
+  const redirect = encodeURIComponent(window.location.origin)
+  return `${BASE}/auth/sso/login/?redirect=${redirect}`
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<string> {
+  const res = await apiFetch<{ detail: string }>('/auth/password/change/', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  })
+  return res.detail
+}
+
+export async function updateMobile(mobile: string): Promise<string> {
+  const res = await apiFetch<{ detail: string }>('/auth/profile/', {
+    method: 'POST',
+    body: JSON.stringify({ mobile }),
+  })
+  return res.detail
 }
 
 export function fetchMe(): Promise<MeInfo> {

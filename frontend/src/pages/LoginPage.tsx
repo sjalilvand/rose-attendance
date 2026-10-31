@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ApiError, login } from '../lib/api'
+import { ApiError, fetchSsoStatus, login, ssoLoginUrl, type SsoStatus } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 
 export default function LoginPage() {
@@ -10,6 +10,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sso, setSso] = useState<SsoStatus | null>(null)
+
+  useEffect(() => {
+    fetchSsoStatus()
+      .then(setSso)
+      .catch(() => setSso({ enabled: false, label: '' }))
+  }, [])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -85,6 +92,14 @@ export default function LoginPage() {
         <button className="btn primary" disabled={busy} type="submit">
           {busy ? 'در حال ورود…' : 'ورود'}
         </button>
+        {sso?.enabled && (
+          <>
+            <div className="divider" aria-hidden><span>یا</span></div>
+            <a className="btn ghost sso-btn" href={ssoLoginUrl()}>
+              ورود با {sso.label} (SSO)
+            </a>
+          </>
+        )}
         <p className="hint">
           با پنج تلاش ناموفق، حساب به مدت ۱۵ دقیقه قفل می‌شود (بخش ۶ سند).
         </p>

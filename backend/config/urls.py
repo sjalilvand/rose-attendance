@@ -31,11 +31,14 @@ from apps.people.management_api import (
 from apps.people.rose_sso import RoseSSOView
 from apps.people.api import (
     MeView,
+    PasswordChangeView,
     PersonnelImportTemplateView,
     PersonnelImportView,
+    ProfileUpdateView,
     TokenObtainPairWithLockoutView,
     TokenRefreshView,
 )
+from apps.people.sso_api import SSOCallbackView, SSOLoginView, SSOStatusView
 from apps.reports.api import (
     AnnualReportExcelView,
     DisciplinaryReportExcelView,
@@ -77,6 +80,11 @@ api_v1 = [
     # ورود یکپارچه (SSO) با رز هاب — Rose Hub
     path("auth/rose-sso/", RoseSSOView.as_view(), name="rose-sso"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
+    path("auth/password/change/", PasswordChangeView.as_view(), name="password-change"),
+    path("auth/profile/", ProfileUpdateView.as_view(), name="profile-update"),
+    path("auth/sso/status/", SSOStatusView.as_view(), name="sso-status"),
+    path("auth/sso/login/", SSOLoginView.as_view(), name="sso-login"),
+    path("auth/sso/callback/", SSOCallbackView.as_view(), name="sso-callback"),
     path("me/", MeView.as_view(), name="me"),
     path("people/import/", PersonnelImportView.as_view(), name="people-import"),
     path("people/import/template/", PersonnelImportTemplateView.as_view(), name="people-import-template"),

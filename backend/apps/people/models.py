@@ -215,6 +215,55 @@ class RoleAssignment(TimeStampedModel):
         indexes = [models.Index(fields=["user", "valid_from", "valid_to"])]
 
 
+class SSOIdentity(TimeStampedModel):
+    """External single-sign-on identity linked to a local user (section 6).
+
+    One user may keep identities from several providers, but one provider must
+    never map to two users — hence the unique (provider, subject) constraint.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sso_identities")
+    provider = models.CharField(max_length=255, help_text="issuer URL تنظیم‌شده در SSO_ISSUER")
+    subject = models.CharField(max_length=255, help_text="claim `sub` شناسهٔ ثابت کاربر نزد ارائه‌دهنده")
+    email = models.CharField(max_length=254, blank=True)
+
+    class Meta:
+        db_table = "sso_identities"
+        verbose_name = "هویت ورود یکپارچه"
+        verbose_name_plural = "هویت‌های ورود یکپارچه"
+        constraints = [
+            models.UniqueConstraint(fields=["provider", "subject"], name="uq_sso_provider_subject"),
+        ]
+        indexes = [models.Index(fields=["user"])]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.user.username} ← {self.provider}"
+
+
+class SSOLoginState(models.Model):
+    """Single-use CSRF state for the SSO authorization-code round-trip.
+
+    Stored in the DB (not the cache) so every gunicorn worker validates the
+    same state; rows are deleted on consumption and swept opportunistically.
+    """
+
+    state = models.CharField(max_length=128, unique=True)
+    redirect_to = models.CharField(max_length=255)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sso_login_states"
+        verbose_name = "وضعیت ورود یکپارچه"
+        verbose_name_plural = "وضعیت‌های ورود یکپارچه"
+
+    @classmethod
+    def sweep(cls) -> None:
+        cls.objects.filter(expires_at__lt=timezone.now()).delete()
+
+    def is_expired(self) -> bool:
+        return self.expires_at <= timezone.now()
+
+
 class DeviceSession(TimeStampedModel):
     """Refresh/session registry — retention >= 90 days (section 6)."""
 

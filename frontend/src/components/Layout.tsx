@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { faDigits } from '../lib/jalali'
 import { fetchUnreadBadge, type UnreadBadge } from '../lib/api'
 import { startNotifications, stopNotifications, type LiveNotification } from '../lib/ws'
+import { initials, roleFa } from '../lib/roles'
 
 const MANAGER_ROLES = ['BRANCH_MANAGER', 'REGION_MANAGER', 'HR', 'ADMIN']
 const HR_ROLES = ['HR', 'ADMIN']
@@ -66,6 +67,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     ...(isHrAdmin ? [{ to: '/management', label: 'مدیریت', icon: '👥' } satisfies Tab] : []),
     { to: '/settings', label: 'تنظیمات', icon: '⚙️' },
   ]
+  const displayName = me?.employee?.full_name ?? me?.username ?? ''
+  const mainRole = me?.roles.length ? roleFa(me.roles[0]) : ''
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -73,14 +76,34 @@ export default function Layout({ children }: { children: ReactNode }) {
           <span className="brand-mark" aria-hidden>✿</span>
           <span className="brand-name">رز سفید</span>
         </div>
-        <button
-          className="linklike"
-          onClick={() => {
-            navigate('/login')
-          }}
-        >
-          خروج
-        </button>
+        <div className="header-side">
+          {me && (
+            <button
+              className="user-chip"
+              title="مشاهدهٔ پروفایل"
+              onClick={() => {
+                navigate('/profile')
+              }}
+            >
+              <span className="avatar" aria-hidden>{initials(displayName)}</span>
+              <span className="user-meta">
+                <strong>{displayName}</strong>
+                <small>
+                  {mainRole}
+                  {me.employee?.home_branch_name ? ` — ${me.employee.home_branch_name}` : ''}
+                </small>
+              </span>
+            </button>
+          )}
+          <button
+            className="linklike"
+            onClick={() => {
+              navigate('/login')
+            }}
+          >
+            خروج
+          </button>
+        </div>
       </header>
       <main className="app-main">{children}</main>
       {toast && (

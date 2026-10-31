@@ -146,6 +146,32 @@ PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
 ]
 
+# Enforced on explicit validate_password() calls (self-service password change)
+# and on the admin site; existing passwords are never touched.
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+     "OPTIONS": {"min_length": 8}},
+]
+
+# ---------------------------------------------------------------------------
+# SSO — generic OpenID Connect provider (Keycloak / Azure AD / Google / ...).
+# Empty defaults keep password login as the only path until the operator opts
+# in; every value is environment-driven (docs/GUIDE.md §SSO).
+# ---------------------------------------------------------------------------
+SSO_ENABLED = os.environ.get("SSO_ENABLED", "0") == "1"
+SSO_ISSUER = os.environ.get("SSO_ISSUER", "").strip()
+SSO_CLIENT_ID = os.environ.get("SSO_CLIENT_ID", "").strip()
+SSO_CLIENT_SECRET = os.environ.get("SSO_CLIENT_SECRET", "").strip()
+SSO_LABEL = os.environ.get("SSO_LABEL", "سامانهٔ سازمانی").strip() or "سامانهٔ سازمانی"
+SSO_SCOPES = os.environ.get("SSO_SCOPES", "openid profile email").strip()
+SSO_AUTO_PROVISION = os.environ.get("SSO_AUTO_PROVISION", "1") == "1"
+SSO_ADMIN_EMAILS = os.environ.get("SSO_ADMIN_EMAILS", "").strip()
+# Public base URL of the API when it lives behind a different host than the
+# request (reverse-proxy edge cases); normally empty.
+SSO_PUBLIC_BASE_URL = os.environ.get("SSO_PUBLIC_BASE_URL", "").strip()
+# Extra PWA origins allowed as post-login redirect targets (comma separated).
+SSO_EXTRA_REDIRECT_ORIGINS = os.environ.get("SSO_EXTRA_REDIRECT_ORIGINS", "").strip()
+
 # Account lockout (users.failed_attempts / locked_until, section 6)
 LOCKOUT_MAX_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15

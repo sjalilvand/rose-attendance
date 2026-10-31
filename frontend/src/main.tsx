@@ -14,6 +14,8 @@ import ImportPage from './pages/ImportPage'
 import OrgPage from './pages/OrgPage'
 import MessagesPage from './pages/MessagesPage'
 import NotificationsPage from './pages/NotificationsPage'
+import ProfilePage from './pages/ProfilePage'
+import SsoCallbackPage from './pages/SsoCallbackPage'
 import ReportsPage from './pages/ReportsPage'
 import SettingsPage from './pages/SettingsPage'
 import InstallPage from './pages/InstallPage'
@@ -54,6 +56,7 @@ function AppRoutes() {
           </PublicOnly>
         }
       />
+      <Route path="/sso" element={<SsoCallbackPage />} />
       <Route
         path="/"
         element={
@@ -150,6 +153,14 @@ function AppRoutes() {
             <RequireStaff>
               <ManagementPage />
             </RequireStaff>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <RequireAuth>
+            <ProfilePage />
           </RequireAuth>
         }
       />
