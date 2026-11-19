@@ -103,6 +103,17 @@ class User(PermissionsMixin, AbstractBaseUser, TimeStampedModel):
     province = models.CharField(max_length=80, blank=True, help_text="استان")
     province_code = models.CharField(max_length=10, blank=True, help_text="کد استان")
     clinic = models.CharField(max_length=200, blank=True, help_text="کلینک محل خدمت")
+    # فاز ۷۲ — مرکز/کلینک با مختصات نقشه از رز هاب (بند ۶)
+    hub_center_name = models.CharField(max_length=200, blank=True, help_text="نام مرکز تخصیص (رز هاب)")
+    hub_center_address = models.CharField(max_length=300, blank=True, help_text="آدرس مرکز تخصیص (رز هاب)")
+    hub_center_lat = models.FloatField(null=True, blank=True, help_text="عرض جغرافیایی مرکز (رز هاب)")
+    hub_center_lng = models.FloatField(null=True, blank=True, help_text="طول جغرافیایی مرکز (رز هاب)")
+    hub_center_radius_m = models.PositiveIntegerField(null=True, blank=True, help_text="شعاع مجاز تردد مرکز (رز هاب)")
+    hub_clinic_name = models.CharField(max_length=200, blank=True, help_text="نام کلینیک خدمت با نقشه (رز هاب)")
+    hub_clinic_lat = models.FloatField(null=True, blank=True, help_text="عرض جغرافیایی کلینیک (رز هاب)")
+    hub_clinic_lng = models.FloatField(null=True, blank=True, help_text="طول جغرافیایی کلینیک (رز هاب)")
+    hub_management = models.CharField(max_length=120, blank=True, help_text="مدیریت متبوع (رز هاب)")
+    hub_manager_name = models.CharField(max_length=120, blank=True, help_text="مدیر مستقیم (رز هاب)")
     failed_attempts = models.PositiveIntegerField(
         default=0, validators=[MinValueValidator(0)]
     )

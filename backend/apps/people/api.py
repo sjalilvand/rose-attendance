@@ -175,6 +175,21 @@ class MeView(APIView):
                 "province": user.province,
                 "province_code": user.province_code,
                 "clinic": user.clinic,
+                # فاز ۷۲ — بند ۶: مرکز/کلینک خدمت با مختصات نقشه (رز هاب)
+                "hub_center": {
+                    "name": user.hub_center_name or None,
+                    "address": user.hub_center_address or None,
+                    "lat": user.hub_center_lat,
+                    "lng": user.hub_center_lng,
+                    "radius_m": user.hub_center_radius_m,
+                },
+                "hub_clinic": {
+                    "name": user.hub_clinic_name or user.clinic or None,
+                    "lat": user.hub_clinic_lat,
+                    "lng": user.hub_clinic_lng,
+                },
+                "hub_management": user.hub_management or None,
+                "hub_manager_name": user.hub_manager_name or None,
                 "employee": employee_payload,
                 "roles": sorted(
                     set(user.active_role_codes()) | ({"ADMIN"} if user.is_superuser else set())
@@ -258,6 +273,11 @@ class ProfileSyncFromHubView(APIView):
                     "province": profile.get("province") or "",
                     "province_code": profile.get("province_code") or "",
                     "clinic": profile.get("clinic") or "",
+                    # فاز ۷۲ — مرکز/کلینک با مختصات نقشه
+                    "center": profile.get("center") or None,
+                    "clinic_center": profile.get("clinicCenter") or None,
+                    "management": profile.get("management") or "",
+                    "manager_name": profile.get("managerName") or "",
                 },
             }
         )

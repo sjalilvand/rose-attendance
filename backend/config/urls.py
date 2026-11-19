@@ -75,6 +75,8 @@ router.register("requests/queue", RequestQueueViewSet, basename="request-queue")
 router.register("leave-types", LeaveTypeViewSet, basename="leave-types")
 router.register("org/regions", RegionViewSet, basename="org-regions")
 router.register("org/branches", BranchViewSet, basename="org-branches")
+# فاز ۷۲ — بند ۱: خروجی شعب برای همگام‌سازی اطلاعات پایهٔ مراکز در رز هاب
+hub_branches = [path("org/hub-branches/", HubBranchesExportView.as_view(), name="org-hub-branches")]
 router.register("scheduling/shifts", ShiftViewSet, basename="scheduling-shifts")
 router.register("leaves/ledger", LeaveLedgerViewSet, basename="leave-ledger")
 router.register("messages/partners", MessagePartnerViewSet, basename="msg-partners")
@@ -116,6 +118,7 @@ api_v1 = [
     path("management/users/<int:user_id>/roles/", ManagementUserRoles.as_view(), name="mgmt-user-roles"),
     path("monitoring/dashboard/", MonitoringDashboardView.as_view(), name="monitoring-dashboard"),
     path("management/seed-demo/", ManagementSeedDemoView.as_view(), name="mgmt-seed-demo"),
+    *hub_branches,
 ]
 
 urlpatterns = [

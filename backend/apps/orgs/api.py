@@ -25,7 +25,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from rest_framework import mixins, serializers, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.views import APIView
 from rest_framework.response import Response
 
 from apps.core.api_utils import (
@@ -345,3 +346,78 @@ class BranchViewSet(
                 "dry_run": dry_run,
             }
         )
+
+
+class HubBranchesExportView(APIView):
+    """GET/POST /api/v1/org/hub-branches/ — خروجی شعب برای همگام‌سازی رز هاب (فاز ۷۲ — بند ۱).
+
+    رز هاب با clientId/clientSecret مشترک (همان جفت‌کلید SSO) این سامانه را
+    صدا می‌زند و فهرست کامل شعب/کلینیک‌ها همراه مختصات جغرافیایی می‌گیرد تا
+    «اطلاعات پایهٔ مراکز» در رز هاب به‌روز بماند. این مسیر سرویس‌به‌سرویس است
+    و احراز هویت کاربر ندارد؛ به‌جای آن اعتبارنامهٔ سامانه بررسی می‌شود.
+    """
+
+    permission_classes = [AllowAny]
+
+    def _credentials(self, request) -> tuple[str, str]:
+        data = {}
+        if request.method == "POST":
+            data = request.data if isinstance(request.data, dict) else {}
+        client_id = str(
+            request.query_params.get("clientId") or data.get("clientId") or ""
+        ).strip()
+        client_secret = str(
+            request.query_params.get("clientSecret") or data.get("clientSecret") or ""
+        ).strip()
+        return client_id, client_secret
+
+    def get(self, request):
+        return self._export(request)
+
+    def post(self, request):
+        return self._export(request)
+
+    def _export(self, request):
+        import hmac
+
+        client_id, client_secret = self._credentials(request)
+        expected_id = getattr(settings, "ROSE_HUB_CLIENT_ID", "")
+        expected_secret = getattr(settings, "ROSE_HUB_CLIENT_SECRET", "")
+        if not client_id or not client_secret:
+            return Response(
+                {"error": "پارامترهای clientId/clientSecret الزامی است"}, status=400
+            )
+        ok_id = hmac.compare_digest(client_id.encode(), expected_id.encode())
+        ok_secret = hmac.compare_digest(
+            client_secret.encode(), (expected_secret or "").encode()
+        )
+        if not (ok_id and ok_secret):
+            return Response({"error": "اعتبارنامهٔ سامانه نامعتبر است"}, status=401)
+
+        branches = Branch.objects.select_related("region").order_by("province", "name")
+        items = []
+        for b in branches:
+            name = b.name
+            if not b.is_active:
+                continue
+            kind = "HQ" if "ستاد" in name else ("CENTER" if "مرکز" in name and "کلینیک" not in name else "CLINIC")
+            items.append(
+                {
+                    "code": b.code,
+                    "name": name,
+                    "kind": kind,
+                    "region": b.region.name if b.region_id else None,
+                    "province": b.province or "",
+                    "city": b.city or "",
+                    "address": b.address or "",
+                    "phone": b.phone or "",
+                    "geo_latitude": b.geo_latitude,
+                    "geo_longitude": b.geo_longitude,
+                    "geo_radius_m": b.geo_radius_m,
+                    "is_active": b.is_active,
+                    "manager_name": (
+                        b.manager_employee.full_name if b.manager_employee_id else None
+                    ),
+                }
+            )
+        return Response({"count": len(items), "branches": items})

@@ -101,8 +101,47 @@ def _sync_sso_profile(user, payload: dict) -> dict:
         if value and getattr(user, field, "") != value:
             setattr(user, field, value)
             changed.append(field)
+
+    # فاز ۷۲ — بند ۶: مرکز تخصیص و کلینک خدمت همراه با مختصات نقشه،
+    # مدیریت متبوع و مدیر مستقیم (در پاسخ جدید /api/sso/profile)
+    def _apply_center(prefix: str, obj: dict | None) -> None:
+        if not isinstance(obj, dict):
+            return
+        name = (obj.get("name") or "").strip()[:200]
+        address = (obj.get("address") or "").strip()[:300]
+        lat = obj.get("lat")
+        lng = obj.get("lng")
+        radius = obj.get("radiusM")
+        pairs: list[tuple[str, object]] = [
+            (f"{prefix}_name", name),
+            (f"{prefix}_lat", float(lat) if isinstance(lat, (int, float)) else None),
+            (f"{prefix}_lng", float(lng) if isinstance(lng, (int, float)) else None),
+        ]
+        if prefix == "hub_center":
+            pairs.append((f"{prefix}_address", address))
+            pairs.append(
+                ("hub_center_radius_m", int(radius) if isinstance(radius, (int, float)) and radius else None)
+            )
+        for field, value in pairs:
+            if value is None and field.endswith(("_name", "_address")):
+                continue  # مقدار خالی یعنی در رز هاب ثبت نشده — مقدار محلی پاک نمی‌شود
+            if getattr(user, field, None) != value:
+                setattr(user, field, value)
+                changed.append(field)
+
+    _apply_center("hub_center", payload.get("center"))
+    _apply_center("hub_clinic", payload.get("clinicCenter"))
+    mgmt_name = (payload.get("management") or "").strip()[:120]
+    if mgmt_name and user.hub_management != mgmt_name:
+        user.hub_management = mgmt_name
+        changed.append("hub_management")
+    mgr_name = (payload.get("managerName") or "").strip()[:120]
+    if mgr_name and user.hub_manager_name != mgr_name:
+        user.hub_manager_name = mgr_name
+        changed.append("hub_manager_name")
+
     if changed:
-        user.save(update_fields=[*changed, "updated_at"])
+        user.save(update_fields=[*set(changed), "updated_at"])
 
     # فاز ۶۵ (تکمیل) — پروندهٔ پرسنلی پیوند‌شده نیز از منبع حقیقت رز هاب
     # بروزرسانی می‌شود؛ چون UI (نوار بالا و صفحهٔ پروفایل) نام و موبایل را
