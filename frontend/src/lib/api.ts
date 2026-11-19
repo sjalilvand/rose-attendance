@@ -166,6 +166,7 @@ export interface PunchResult {
   event_status: string
   location_status: string
   location_reason: string
+  location_distance_m: number | null
   flags: string[]
   effective_time: string
 }
@@ -202,6 +203,7 @@ export interface TodayCard {
     effective_time: string
     location_status: string
     location_reason: string
+    location_distance_m: number | null
     event_status: string
     flags: string[]
     connection_mode: string
@@ -802,6 +804,10 @@ export function createBranch(payload: Record<string, unknown>): Promise<OrgBranc
   return apiFetch('/org/branches/', { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export function updateBranch(id: number, payload: Record<string, unknown>): Promise<OrgBranch> {
+  return apiFetch(`/org/branches/${id}/`, { method: 'PATCH', body: JSON.stringify(payload) })
+}
+
 export function fetchOrgShifts(params: {
   page?: number
   page_size?: number
@@ -1132,9 +1138,117 @@ export interface AccountImportReport {
   created_sample: { row: number; username: string; full_name: string; mobile: string }[]
 }
 
-export function importAccountsExcel(file: File, dryRun: boolean): Promise<AccountImportReport> {
+export function importAccountsExcel(file: File, dryRun: boolean, opts?: { sheet?: string; jobTitle?: string }): Promise<AccountImportReport> {
   const form = new FormData()
   form.append('file', file)
   if (dryRun) form.append('dry_run', 'true')
+  if (opts?.sheet) form.append('sheet', opts.sheet)
+  if (opts?.jobTitle) form.append('job_title', opts.jobTitle)
   return apiFetch('/management/personnel/import-accounts/', { method: 'POST', body: form })
+}
+
+export interface ImportSheetInfo {
+  index: number
+  name: string
+  rows: number
+}
+
+export function inspectImportSheets(file: File): Promise<{ sheets: ImportSheetInfo[] }> {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetch('/management/personnel/import-accounts/inspect/', { method: 'POST', body: form })
+}
+
+// Roles management — dated role assignments (HR/ADMIN)
+export interface RoleInfo {
+  code: string
+  name: string
+}
+
+export interface UserRoleRow {
+  id: number
+  role_code: string
+  role_name: string
+  branch_id: number | null
+  branch_code: string | null
+  branch_name: string | null
+  valid_from: string
+  valid_to: string | null
+  is_active: boolean
+}
+
+export function fetchRoles(): Promise<{ results: RoleInfo[] }> {
+  return apiFetch('/management/roles/')
+}
+
+export function fetchUserRoles(userId: number): Promise<{ count: number; results: UserRoleRow[] }> {
+  return apiFetch(`/management/users/${userId}/roles/`)
+}
+
+export function assignUserRole(
+  userId: number,
+  payload: { role_code: string; branch_id?: number | null; valid_from?: string },
+): Promise<{ id: number; detail: string }> {
+  return apiFetch(`/management/users/${userId}/roles/`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function revokeUserRole(userId: number, assignmentId: number): Promise<{ detail: string; removed: boolean }> {
+  return apiFetch(`/management/users/${userId}/roles/?assignment_id=${assignmentId}`, { method: 'DELETE' })
+}
+
+// Web monitoring dashboard — live operational view (HR/ADMIN/managers)
+export interface MonitoringEvent {
+  event_uuid: string
+  employee: string
+  personnel_code: string
+  branch: string
+  branch_name: string
+  event_type: string
+  effective_time: string
+  connection_mode: string
+  event_status: string
+  location_status: string
+  location_distance_m: number | null
+  location_accuracy_m: number | null
+  location_reason?: string
+}
+
+export interface MonitoringDashboard {
+  today: string
+  branches_in_scope: number
+  kpis: {
+    employees_active: number
+    events_today: number
+    with_events_today: number
+    present_now: number
+    out_of_range_today: number
+    no_gps_today: number
+    low_accuracy_today: number
+    in_range_today: number
+    needs_review_today: number
+  }
+  present_now: {
+    employee: string
+    personnel_code: string
+    branch: string
+    branch_name: string
+    check_in_at: string | null
+    minutes_so_far: number | null
+  }[]
+  live_events: MonitoringEvent[]
+  deviations_today: MonitoringEvent[]
+  absent_today: {
+    employee: string
+    personnel_code: string
+    home_branch: string
+    home_branch_name: string
+  }[]
+  absent_total: number
+}
+
+export function fetchMonitoringDashboard(params?: { branch?: string; region?: string }): Promise<MonitoringDashboard> {
+  const q = new URLSearchParams()
+  if (params?.branch) q.set('branch', params.branch)
+  if (params?.region) q.set('region', params.region)
+  return apiFetch(`/monitoring/dashboard/?${q.toString()}`)
 }

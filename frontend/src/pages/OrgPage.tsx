@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import GeoMap from '../components/GeoMap'
 import {
   adjustLedger,
   bulkUpsertBranches,
@@ -16,6 +17,7 @@ import {
   fetchOrgShifts,
   importLedgerBalances,
   seedLedger,
+  updateBranch,
   type BalancesResp,
   type BulkReport,
   type LedgerEntry,
@@ -24,7 +26,8 @@ import {
   type OrgRegion,
   type OrgShift,
 } from '../lib/api'
-import { minutesToHM } from '../lib/jalali'
+import { getPosition } from '../lib/geo'
+import { faDigits, minutesToHM } from '../lib/jalali'
 
 const HR_ROLES = ['HR', 'ADMIN']
 
@@ -263,7 +266,8 @@ function BranchesTab() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<BulkReport | null>(null)
-  const [form, setForm] = useState({ code: '', name: '', region_code: '', province: '', city: '' })
+  const [form, setForm] = useState({ code: '', name: '', region_code: '', province: '', city: '', geo_latitude: '', geo_longitude: '', geo_radius_m: '' })
+  const [editing, setEditing] = useState<OrgBranch | null>(null)
 
   const load = useCallback(async (p = page, s = search, r = regionFilter) => {
     setError('')
@@ -291,9 +295,13 @@ function BranchesTab() {
     setNotice('')
     setBusy(true)
     try {
-      await createBranch({ ...form })
+      const geoFields: Record<string, number> = {}
+      if (form.geo_latitude.trim()) geoFields.geo_latitude = Number(form.geo_latitude)
+      if (form.geo_longitude.trim()) geoFields.geo_longitude = Number(form.geo_longitude)
+      if (form.geo_radius_m.trim()) geoFields.geo_radius_m = Number(form.geo_radius_m)
+      await createBranch({ ...form, ...geoFields })
       setNotice(`شعبهٔ ${form.code} ساخته شد.`)
-      setForm({ code: '', name: '', region_code: form.region_code, province: '', city: '' })
+      setForm({ code: '', name: '', region_code: form.region_code, province: '', city: '', geo_latitude: '', geo_longitude: '', geo_radius_m: '' })
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ثبت شعبه ناموفق بود')
@@ -329,6 +337,17 @@ function BranchesTab() {
   const pages = Math.max(1, Math.ceil(count / 50))
   return (
     <>
+      {editing && (
+        <BranchGeoEditor
+          branch={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(b) => {
+            setNotice(`مختصات «${b.name}» ثبت شد.`)
+            setEditing(null)
+            void load()
+          }}
+        />
+      )}
       <section className="card">
         <h3 className="h4">افزودن شعبه</h3>
         <form onSubmit={submitForm}>
@@ -354,8 +373,23 @@ function BranchesTab() {
               <span>شهر (اختیاری)</span>
               <input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} maxLength={80} />
             </label>
+            <label className="field-row">
+              <span>عرض جغرافیایی (اختیاری)</span>
+              <input value={form.geo_latitude} onChange={(e) => setForm({ ...form, geo_latitude: e.target.value })} inputMode="decimal" placeholder="35.7797" dir="ltr" />
+            </label>
+            <label className="field-row">
+              <span>طول جغرافیایی (اختیاری)</span>
+              <input value={form.geo_longitude} onChange={(e) => setForm({ ...form, geo_longitude: e.target.value })} inputMode="decimal" placeholder="51.3806" dir="ltr" />
+            </label>
+            <label className="field-row">
+              <span>شعاع مجاز (متر)</span>
+              <input value={form.geo_radius_m} onChange={(e) => setForm({ ...form, geo_radius_m: e.target.value })} inputMode="numeric" placeholder="150 تا ۱۰۰۰" dir="ltr" />
+            </label>
           </div>
-          <p className="hint">مختصات جغرافیایی و شعاع را بعداً می‌توانید از پنل ادمین تکمیل کنید.</p>
+          <p className="hint">
+            مختصات را می‌توانید بعداً با دکمهٔ «ویرایش» از روی نقشه تنظیم کنید — کلیک روی نقشه یا
+            دکمهٔ «موقعیت من» مرکز اداره را ثبت می‌کند؛ دایرهٔ قرمز شعاع مجاز تردد است.
+          </p>
           {error && <div className="banner danger">{error}</div>}
           {notice && <div className="banner ok">{notice}</div>}
           <button className="btn" type="submit" disabled={busy}>ثبت شعبه</button>
@@ -385,9 +419,11 @@ function BranchesTab() {
               <th>نام</th>
               <th>منطقه</th>
               <th>شهر</th>
+              <th>مختصات</th>
               <th>شعاع</th>
               <th>پرسنل</th>
               <th>وضعیت</th>
+              <th>عملیات</th>
             </tr>
           </thead>
           <tbody>
@@ -397,12 +433,22 @@ function BranchesTab() {
                 <td>{b.name}</td>
                 <td className="mono">{b.region_code}</td>
                 <td>{b.city || '—'}</td>
-                <td>{b.geo_radius_m} م</td>
+                <td className="mono">
+                  {b.geo_latitude != null && b.geo_longitude != null
+                    ? `${b.geo_latitude.toFixed(5)}, ${b.geo_longitude.toFixed(5)}`
+                    : <span className="chip chip-warn">بدون نقشه</span>}
+                </td>
+                <td>{faDigits(b.geo_radius_m)} م</td>
                 <td>{b.employee_count}</td>
                 <td>
                   <span className={`chip ${b.is_active ? 'chip-ok' : 'chip-muted'}`}>
                     {b.is_active ? 'فعال' : 'غیرفعال'}
                   </span>
+                </td>
+                <td>
+                  <button className="btn ghost" onClick={() => setEditing(b)}>
+                    ویرایش
+                  </button>
                 </td>
               </tr>
             ))}
@@ -427,6 +473,126 @@ function BranchesTab() {
         onRun={runBulk}
       />
     </>
+  )
+}
+
+
+// ---------------------------------------------------------------------------
+// Branch geo editor — Leaflet map picker + manual lat/lng/radius (ژئوفنس)
+// ---------------------------------------------------------------------------
+function BranchGeoEditor({
+  branch,
+  onClose,
+  onSaved,
+}: {
+  branch: OrgBranch
+  onClose: () => void
+  onSaved: (b: OrgBranch) => void
+}) {
+  const [lat, setLat] = useState<string>(branch.geo_latitude != null ? String(branch.geo_latitude) : '')
+  const [lng, setLng] = useState<string>(branch.geo_longitude != null ? String(branch.geo_longitude) : '')
+  const [radius, setRadius] = useState<string>(String(branch.geo_radius_m))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [geoMsg, setGeoMsg] = useState('')
+
+  const latNum = lat.trim() === '' ? null : Number(lat)
+  const lngNum = lng.trim() === '' ? null : Number(lng)
+  const radiusNum = Number(radius || 150)
+
+  const invalid =
+    (lat.trim() !== '' && (latNum == null || Number.isNaN(latNum) || latNum < -90 || latNum > 90)) ||
+    (lng.trim() !== '' && (lngNum == null || Number.isNaN(lngNum) || lngNum < -180 || lngNum > 180)) ||
+    radiusNum < 50 ||
+    radiusNum > 1000
+
+  async function useMyLocation() {
+    setError('')
+    setGeoMsg('')
+    const pos = await getPosition()
+    if (!pos) {
+      setError('موقعیت دستگاه در دسترس نیست — اجازهٔ دسترسی به موقعیت را بررسی کنید.')
+      return
+    }
+    setLat(pos.coords.latitude.toFixed(6))
+    setLng(pos.coords.longitude.toFixed(6))
+    setGeoMsg('موقعیت فعلی شما ثبت شد — اگر داخل اداره هستید، همین مرکز اداره است.')
+  }
+
+  async function save() {
+    if (invalid) {
+      setError('مختصات یا شعاع نامعتبر است (شعاع مجاز: ۵۰ تا ۱۰۰۰ متر).')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const payload: Record<string, unknown> = { geo_radius_m: radiusNum }
+      if (latNum == null || lngNum == null) {
+        payload.geo_latitude = null
+        payload.geo_longitude = null
+      } else {
+        payload.geo_latitude = latNum
+        payload.geo_longitude = lngNum
+      }
+      const saved = await updateBranch(branch.id, payload)
+      onSaved(saved)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'ثبت مختصات ناموفق بود')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="row between">
+        <div className="h">ویرایش موقعیت شعبه — {branch.code} ({branch.name})</div>
+        <button className="btn ghost" onClick={onClose}>بستن</button>
+      </div>
+      <p className="hint">
+        روی نقشه کلیک کنید یا نشان را بکشید تا مرکز اداره تنظیم شود؛ دایرهٔ قرمز شعاع مجاز تردد
+        است (پیش‌فرض ۱۵۰ متر شهری / ۳۰۰ کلینیک). دکمهٔ «موقعیت من» اگر داخل اداره بزنید، دقیق‌ترین
+        نتیجه را می‌دهد. خالی‌کردن مختصات یعنی حذف مرکز (کنترل GPS غیرفعال می‌شود).
+      </p>
+      <GeoMap
+        lat={latNum}
+        lng={lngNum}
+        radiusM={radiusNum}
+        onPick={(a, o) => {
+          setLat(a.toFixed(6))
+          setLng(o.toFixed(6))
+          setGeoMsg('')
+        }}
+      />
+      <div className="grid2" style={{ marginTop: 12 }}>
+        <label className="field-row">
+          <span>عرض جغرافیایی</span>
+          <input value={lat} onChange={(e) => setLat(e.target.value)} inputMode="decimal" dir="ltr" />
+        </label>
+        <label className="field-row">
+          <span>طول جغرافیایی</span>
+          <input value={lng} onChange={(e) => setLng(e.target.value)} inputMode="decimal" dir="ltr" />
+        </label>
+        <label className="field-row">
+          <span>شعاع مجاز (متر) — ۵۰ تا ۱۰۰۰</span>
+          <input value={radius} onChange={(e) => setRadius(e.target.value)} inputMode="numeric" dir="ltr" />
+        </label>
+        <div className="field-row import-actions">
+          <span> </span>
+          <div className="row-inline">
+            <button className="btn primary" disabled={busy || invalid} onClick={() => void save()}>
+              {busy ? 'در حال ثبت…' : 'ثبت مختصات'}
+            </button>
+            <button className="btn ghost" disabled={busy} onClick={() => void useMyLocation()}>
+              موقعیت من
+            </button>
+          </div>
+        </div>
+      </div>
+      {geoMsg && <div className="banner info">{geoMsg}</div>}
+      {error && <div className="banner danger">{error}</div>}
+    </section>
   )
 }
 

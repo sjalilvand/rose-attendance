@@ -47,26 +47,29 @@ class EventDecision:
     flags: list[str] = field(default_factory=list)
     location_status: str = LocationStatus.UNAVAILABLE
     location_reason: str = ""
+    location_distance_m: float | None = None
 
 
-def resolve_location(branch, latitude, longitude, accuracy_m) -> tuple[str, str]:
+def resolve_location(branch, latitude, longitude, accuracy_m) -> tuple[str, str, float | None]:
     """Geofence decision — approved decision #3: OUT_OF_RANGE is a label.
 
     Order: no coordinates -> UNAVAILABLE; coordinates beyond radius ->
     OUT_OF_RANGE; poor accuracy -> LOW_ACCURACY; otherwise IN_RANGE.
+    Third return value is the haversine distance in metres (None when the
+    punch has no coordinates or the branch has no configured centre).
     """
     if latitude is None or longitude is None:
-        return LocationStatus.UNAVAILABLE, "NO_COORDINATES"
+        return LocationStatus.UNAVAILABLE, "NO_COORDINATES", None
     if branch.geo_latitude is None or branch.geo_longitude is None:
         # Branch has no configured centre yet — treat like unavailable
         # (recorded, labelled, never rejected).
-        return LocationStatus.UNAVAILABLE, "BRANCH_NOT_GEOCODED"
+        return LocationStatus.UNAVAILABLE, "BRANCH_NOT_GEOCODED", None
     distance = haversine_m(branch.geo_latitude, branch.geo_longitude, latitude, longitude)
     if distance > branch.geo_radius_m:
-        return LocationStatus.OUT_OF_RANGE, f"DISTANCE={distance:.0f}m"
+        return LocationStatus.OUT_OF_RANGE, f"DISTANCE={distance:.0f}m", distance
     if accuracy_m is not None and accuracy_m > settings.APP_THRESHOLDS["LOCATION_MAX_ACCURACY_M"]:
-        return LocationStatus.LOW_ACCURACY, f"ACCURACY={accuracy_m:.0f}m"
-    return LocationStatus.IN_RANGE, ""
+        return LocationStatus.LOW_ACCURACY, f"ACCURACY={accuracy_m:.0f}m", distance
+    return LocationStatus.IN_RANGE, "", distance
 
 
 def decide_event(*, device_time: dt.datetime, connection_mode: str,
@@ -107,13 +110,14 @@ def decide_event(*, device_time: dt.datetime, connection_mode: str,
     elif skew_minutes > t["CLOCK_SKEW_MINUTES"]:
         flags.append("CLOCK_SKEW")
 
-    loc_status, loc_reason = resolve_location(branch, latitude, longitude, accuracy_m)
+    loc_status, loc_reason, loc_distance = resolve_location(branch, latitude, longitude, accuracy_m)
     return EventDecision(
         effective_time=effective,
         event_status=status,
         flags=flags,
         location_status=loc_status,
         location_reason=loc_reason,
+        location_distance_m=loc_distance,
     )
 
 
@@ -366,6 +370,7 @@ def receive_punch(*, employee, branch, event_type: str, event_uuid,
         location_fixed_at=location_fixed_at,
         location_status=decision.location_status,
         location_reason=decision.location_reason,
+        location_distance_m=decision.location_distance_m,
         event_status=decision.event_status,
         flags=decision.flags,
         local_seq=local_seq,

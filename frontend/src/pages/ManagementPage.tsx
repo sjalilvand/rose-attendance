@@ -5,21 +5,29 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import {
   ApiError,
+  assignUserRole,
   createMgmtPersonnel,
   createPersonnelUser,
   fetchMgmtPersonnel,
   fetchMgmtUsers,
   fetchOrgBranches,
+  fetchRoles,
+  fetchUserRoles,
   importAccountsExcel,
+  inspectImportSheets,
+  revokeUserRole,
   seedDemoPersonnel,
   setMgmtUserPassword,
   updateMgmtPersonnel,
   updateMgmtUser,
   type AccountImportReport,
+  type ImportSheetInfo,
   type MgmtPersonnelRow,
   type MgmtUserRow,
   type OrgBranch,
+  type RoleInfo,
   type SeedDemoReport,
+  type UserRoleRow,
 } from '../lib/api'
 import { faDigits, formatJalaliDate } from '../lib/jalali'
 
@@ -99,6 +107,15 @@ export default function ManagementPage() {
   const importFileRef = useRef<HTMLInputElement>(null)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importReport, setImportReport] = useState<AccountImportReport | null>(null)
+  const [importSheets, setImportSheets] = useState<ImportSheetInfo[]>([])
+  const [importSheet, setImportSheet] = useState('')
+  const [importJobTitle, setImportJobTitle] = useState('مشاور')
+
+  const [rolesFor, setRolesFor] = useState<{ id: number; username: string } | null>(null)
+  const [allRoles, setAllRoles] = useState<RoleInfo[]>([])
+  const [userRoles, setUserRoles] = useState<UserRoleRow[] | null>(null)
+  const [newRoleCode, setNewRoleCode] = useState('')
+  const [newRoleBranch, setNewRoleBranch] = useState('')
 
   const load = useCallback(async (search: string) => {
     setBusy(true)
@@ -227,6 +244,55 @@ export default function ManagementPage() {
     }
   }
 
+  async function openRoles(u: { id: number; username: string }) {
+    setRolesFor(u)
+    setUserRoles(null)
+    setNewRoleCode('')
+    setNewRoleBranch('')
+    try {
+      const [roles, mine] = await Promise.all([fetchRoles(), fetchUserRoles(u.id)])
+      setAllRoles(roles.results)
+      setUserRoles(mine.results)
+    } catch (e) {
+      setErr(errMsg(e))
+    }
+  }
+
+  async function submitRole() {
+    if (!rolesFor || !newRoleCode) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await assignUserRole(rolesFor.id, {
+        role_code: newRoleCode,
+        branch_id: newRoleBranch ? Number(newRoleBranch) : null,
+      })
+      setMsg(r.detail)
+      await openRoles(rolesFor)
+      await load(q)
+    } catch (e) {
+      setErr(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function endRole(assignmentId: number) {
+    if (!rolesFor) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await revokeUserRole(rolesFor.id, assignmentId)
+      setMsg(r.detail)
+      await openRoles(rolesFor)
+      await load(q)
+    } catch (e) {
+      setErr(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function toggleActive(u: MgmtUserRow) {
     setBusy(true)
     setErr(null)
@@ -267,7 +333,10 @@ export default function ManagementPage() {
     setErr(null)
     setMsg(null)
     try {
-      const report = await importAccountsExcel(importFile, dryRun)
+      const report = await importAccountsExcel(importFile, dryRun, {
+        sheet: importSheet,
+        jobTitle: importJobTitle,
+      })
       setImportReport(report)
       if (dryRun) {
         setMsg(
@@ -444,14 +513,52 @@ export default function ManagementPage() {
           تماس/موبایل» (اختیاری: «کد تفضیلی»، «استان»). ارقام فارسی هم پذیرفته می‌شود و ردیف‌های
           تکراری دست‌نخورده رد می‌شوند. اول «بررسی اولیه» را بزنید، بعد «ثبت گروهی».
         </p>
+        <p className="hint">
+          اگر فایل چند کاربرگ دارد، کاربرگ و عنوان شغلی همان کاربرگ را انتخاب کنید (مثلاً
+          «مدیران کلینیک» با عنوان «مدیر کلینیک»).
+        </p>
         <div className="row-inline">
+          <label className="compact-label">
+            کاربرگ
+            <select
+              value={importSheet}
+              onChange={(e) => setImportSheet(e.target.value)}
+              disabled={importSheets.length === 0}
+            >
+              {importSheets.length === 0 && <option value="">— پس از انتخاب فایل —</option>}
+              {importSheets.map((sh) => (
+                <option key={sh.index} value={String(sh.index)}>
+                  {sh.name} ({faDigits(sh.rows)} ردیف)
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="compact-label">
+            عنوان شغلی
+            <input
+              value={importJobTitle}
+              onChange={(e) => setImportJobTitle(e.target.value)}
+              maxLength={120}
+            />
+          </label>
           <input
             ref={importFileRef}
             type="file"
             accept=".xlsx,.xlsm"
             onChange={(e) => {
-              setImportFile(e.target.files?.[0] ?? null)
+              const f = e.target.files?.[0] ?? null
+              setImportFile(f)
               setImportReport(null)
+              setImportSheets([])
+              setImportSheet('')
+              if (f) {
+                inspectImportSheets(f)
+                  .then((r) => {
+                    setImportSheets(r.sheets)
+                    if (r.sheets.length > 1) setImportSheet(String(r.sheets[0].index))
+                  })
+                  .catch(() => setImportSheets([]))
+              }
             }}
           />
           <button
@@ -636,15 +743,20 @@ export default function ManagementPage() {
                           ویرایش
                         </button>
                         {row.user ? (
-                          <button
-                            className="btn ghost"
-                            onClick={() => {
-                              setPwForId(row.user!.id)
-                              setNewPw('')
-                            }}
-                          >
-                            ریست رمز
-                          </button>
+                          <>
+                            <button
+                              className="btn ghost"
+                              onClick={() => {
+                                setPwForId(row.user!.id)
+                                setNewPw('')
+                              }}
+                            >
+                              ریست رمز
+                            </button>
+                            <button className="btn ghost" onClick={() => void openRoles(row.user!)}>
+                              نقش‌ها
+                            </button>
+                          </>
                         ) : (
                           <button
                             className="btn ghost"
@@ -707,6 +819,102 @@ export default function ManagementPage() {
               }}
             >
               انصراف
+            </button>
+          </div>
+        </section>
+      )}
+
+      {rolesFor !== null && (
+        <section className="card">
+          <div className="row between">
+            <div className="h">نقش‌های کاربر «{rolesFor.username}»</div>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setRolesFor(null)
+                setUserRoles(null)
+              }}
+            >
+              بستن
+            </button>
+          </div>
+          <p className="hint">
+            نقش، سطح دسترسی را تعیین می‌کند: مدیر شعبه فقط شعبهٔ خودش را می‌بیند (مانیتورینگ و
+            رسیدگی)، HR/ADMIN دسترسی مدیریتی کامل، حسابرس فقط مشاهده. نقش می‌تواند با شعبه محدود شود.
+          </p>
+          {userRoles === null && <div className="page-loading">در حال بارگذاری…</div>}
+          {userRoles !== null && userRoles.length === 0 && (
+            <div className="muted">این کاربر هیچ نقشی ندارد — دسترسی عادی پرسنل.</div>
+          )}
+          {userRoles !== null && userRoles.length > 0 && (
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>نقش</th>
+                    <th>شعبه</th>
+                    <th>از</th>
+                    <th>تا</th>
+                    <th>وضعیت</th>
+                    <th>عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {userRoles.map((r) => (
+                    <tr key={r.id}>
+                      <td>
+                        <span className="chip chip-info">{r.role_name}</span>
+                      </td>
+                      <td>{r.branch_code ? `${r.branch_code} — ${r.branch_name}` : 'کل سازمان'}</td>
+                      <td className="mono">{r.valid_from}</td>
+                      <td className="mono">{r.valid_to ?? '—'}</td>
+                      <td>
+                        <span className={`chip ${r.is_active ? 'chip-ok' : 'chip-muted'}`}>
+                          {r.is_active ? 'فعال' : 'پایان‌یافته'}
+                        </span>
+                      </td>
+                      <td>
+                        {r.is_active && (
+                          <button className="btn ghost" disabled={busy} onClick={() => void endRole(r.id)}>
+                            پایان نقش
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="row-inline" style={{ marginTop: 12 }}>
+            <label className="compact-label">
+              نقش جدید
+              <select value={newRoleCode} onChange={(e) => setNewRoleCode(e.target.value)}>
+                <option value="">— انتخاب نقش —</option>
+                {allRoles.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.name} ({r.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="compact-label">
+              محدود به شعبه (اختیاری)
+              <select value={newRoleBranch} onChange={(e) => setNewRoleBranch(e.target.value)}>
+                <option value="">کل سازمان</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.code} — {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="btn primary"
+              disabled={busy || !newRoleCode}
+              onClick={() => void submitRole()}
+            >
+              تخصیص نقش
             </button>
           </div>
         </section>

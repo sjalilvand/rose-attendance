@@ -42,7 +42,25 @@ _DIGITS_RE = re.compile(r"\d+")
 
 
 class AccountImportFormatError(Exception):
-    """مشکل در سطح فایل (خوانا نیست، ستون الزامی نیست)."""
+    """مشکل در سطح فایل (خوانا نیست، ستون الزامی نیست، کاربرگ نیست)."""
+
+
+def _pick_sheet(wb, sheet: str):
+    """انتخاب کاربرگ بر اساس نام یا شمارهٔ ۱مرتبه؛ خالی/یافت‌نشدن = اولین کاربرگ."""
+    wanted = (sheet or "").strip()
+    if not wanted:
+        return wb.worksheets[0]
+    if wanted.isdigit():
+        idx = int(wanted) - 1
+        if 0 <= idx < len(wb.worksheets):
+            return wb.worksheets[idx]
+        raise AccountImportFormatError(f"کاربرگ شمارهٔ {wanted} وجود ندارد (کل: {len(wb.worksheets)}).")
+    for ws in wb.worksheets:
+        if ws.title.strip() == wanted:
+            return ws
+    raise AccountImportFormatError(
+        "کاربرگ «" + wanted + "» یافت نشد؛ کاربرگ‌های موجود: " + "، ".join(w.title for w in wb.worksheets)
+    )
 
 
 def _norm_header(text: str) -> str:
@@ -171,20 +189,40 @@ def _ensure_default_branch() -> Branch:
     return Branch.objects.create(code="HQ", name="دفتر مرکزی", region=region)
 
 
+def inspect_workbook(data: bytes) -> list[dict]:
+    """فهرست کاربرگ‌ها + تعداد ردیف غیرخالی هرکدام (بدون خواندن ستون‌ها)."""
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as exc:
+        raise AccountImportFormatError("فایل قابل خواندن نیست؛ قالب xlsx الزامی است.") from exc
+    try:
+        sheets = []
+        for idx, ws in enumerate(wb.worksheets, start=1):
+            rows = sum(1 for row in ws.iter_rows(values_only=True) if any(v not in (None, "") for v in row))
+            sheets.append({"index": idx, "name": ws.title, "rows": rows})
+        return sheets
+    finally:
+        wb.close()
+
+
 def import_accounts(
     data: bytes,
     *,
     dry_run: bool = False,
     job_title: str = "مشاور",
+    sheet: str = "",
 ) -> dict:
-    """ورود گروهی پرسنل + حساب کاربری از فایل اکسل؛ گزارش ردیف‌به‌ردیف برمی‌گرداند."""
+    """ورود گروهی پرسنل + حساب کاربری از فایل اکسل؛ گزارش ردیف‌به‌ردیف برمی‌گرداند.
+
+    sheet: نام یا شمارهٔ ۱مرتبهٔ کاربرگ؛ خالی = اولین کاربرگ.
+    """
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except Exception as exc:  # openpyxl انواع زیادی خطا می‌دهد
         raise AccountImportFormatError("فایل قابل خواندن نیست؛ قالب xlsx الزامی است.") from exc
 
     try:
-        ws = wb.worksheets[0]
+        ws = _pick_sheet(wb, sheet)
         rows = ws.iter_rows(values_only=True)
         try:
             header = list(next(rows))
@@ -283,6 +321,7 @@ def import_accounts(
         "duplicates": len(duplicates),
         "errors": len(errors),
         "dry_run": dry_run,
+        "sheet": ws.title,
         "branch": {"code": branch.code, "name": branch.name},
         "rule": {"username": "کد ملی", "password": "شماره موبایل"},
         "job_title": job_title,

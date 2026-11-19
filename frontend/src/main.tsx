@@ -20,6 +20,7 @@ import ReportsPage from './pages/ReportsPage'
 import SettingsPage from './pages/SettingsPage'
 import InstallPage from './pages/InstallPage'
 import ManagementPage from './pages/ManagementPage'
+import MonitoringPage from './pages/MonitoringPage'
 import './styles.css'
 
 registerSW({ immediate: true })
@@ -41,6 +42,15 @@ function PublicOnly({ children }: { children: JSX.Element }) {
 function RequireStaff({ children }: { children: JSX.Element }) {
   const { me } = useAuth()
   const allowed = Boolean(me && me.roles.some((r) => r === 'HR' || r === 'ADMIN'))
+  if (!allowed) return <Navigate to="/" replace />
+  return children
+}
+
+const MONITORING_ROLES = ['HR', 'ADMIN', 'REGION_MANAGER', 'AUDITOR', 'BRANCH_MANAGER']
+
+function RequireManager({ children }: { children: JSX.Element }) {
+  const { me } = useAuth()
+  const allowed = Boolean(me && me.roles.some((r) => MONITORING_ROLES.includes(r)))
   if (!allowed) return <Navigate to="/" replace />
   return children
 }
@@ -153,6 +163,16 @@ function AppRoutes() {
             <RequireStaff>
               <ManagementPage />
             </RequireStaff>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/monitoring"
+        element={
+          <RequireAuth>
+            <RequireManager>
+              <MonitoringPage />
+            </RequireManager>
           </RequireAuth>
         }
       />

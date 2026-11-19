@@ -142,14 +142,25 @@ export default function PunchPage() {
 
   function punchNotice(result: PunchResult): { kind: 'ok' | 'warn' | 'danger'; text: string } {
     const base = result.event_type === 'CHECK_IN' ? 'ورود' : 'خروج'
+    const dist = result.location_distance_m
+    const distTxt =
+      dist != null
+        ? `فاصله تا مرکز اداره: ${faDigits(Math.round(dist))} متر — `
+        : ''
     if (result.location_status === 'OUT_OF_RANGE') {
-      return { kind: 'warn', text: `${base} ثبت شد — خارج از محدوده شعبه (تصمیم مصوب ۳: برچسب، نه رد).` }
+      return {
+        kind: 'warn',
+        text: `${base} ثبت شد — ${distTxt}خارج از محدودهٔ اداره (انحراف در مانیتورینگ ثبت شد؛ تصمیم مصوب ۳: برچسب، نه رد).`,
+      }
     }
     if (result.location_status === 'UNAVAILABLE') {
       return { kind: 'ok', text: `${base} بدون موقعیت ثبت شد (ثبت بدون GPS مجاز است).` }
     }
     if (result.flags.includes('CLOCK_SKEW')) {
-      return { kind: 'warn', text: `${base} ثبت شد — مغایرت ساعت دستگاه ثبت شد.` }
+      return { kind: 'warn', text: `${base} ثبت شد — ${distTxt}مغایرت ساعت دستگاه ثبت شد.` }
+    }
+    if (dist != null) {
+      return { kind: 'ok', text: `${base} ثبت شد — ${distTxt}در محدودهٔ اداره.` }
     }
     return { kind: 'ok', text: `${base} با موفقیت ثبت شد.` }
   }

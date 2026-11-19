@@ -18,7 +18,7 @@ from rest_framework.views import APIView
 from apps.core.enums import EmploymentStatus
 from apps.orgs.models import Branch, Region
 
-from .account_importer import AccountImportFormatError, import_accounts
+from .account_importer import AccountImportFormatError, import_accounts, inspect_workbook
 from .models import Employee, User
 
 DEMO_PASSWORD_DEFAULT = "Rose#1404"
@@ -365,11 +365,131 @@ class ManagementUserSetPassword(APIView):
         return Response({"detail": f"گذرواژهٔ «{user.username}» عوض شد.", "username": user.username})
 
 
+class ManagementRolesList(APIView):
+    """GET /api/v1/management/roles/ — فهرست نقش‌های قابل تخصیص."""
+
+    permission_classes = [IsAuthenticated, IsPeopleManager]
+
+    def get(self, request):
+        from .models import Role
+
+        return Response(
+            {"results": [{"code": r.code, "name": r.name} for r in Role.objects.order_by("id")]}
+        )
+
+
+class ManagementUserRoles(APIView):
+    """GET/POST/DELETE /api/v1/management/users/{id}/roles/ — مدیریت نقش‌ها.
+
+    POST: {role_code, branch_id?, valid_from?} — تخصیص نقش (پیش‌فرض از امروز).
+    DELETE ?assignment_id=N — پایان نقش (valid_to = دیروز؛ اگر همان روز تخصیص
+    یافته باشد ردیف حذف می‌شود چون قید chk_role_period مجازش نمی‌داند).
+    """
+
+    permission_classes = [IsAuthenticated, IsPeopleManager]
+
+    def get(self, request, user_id: int):
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return _bad("کاربر یافت نشد.", "NOT_FOUND", 404)
+        today = timezone.localdate()
+        rows = []
+        for ra in user.role_assignments.select_related("role", "branch").order_by("-valid_from", "-id"):
+            active = ra.valid_from <= today and (ra.valid_to is None or ra.valid_to >= today)
+            rows.append(
+                {
+                    "id": ra.id,
+                    "role_code": ra.role.code,
+                    "role_name": ra.role.name,
+                    "branch_id": ra.branch_id,
+                    "branch_code": ra.branch.code if ra.branch_id else None,
+                    "branch_name": ra.branch.name if ra.branch_id else None,
+                    "valid_from": ra.valid_from.isoformat(),
+                    "valid_to": ra.valid_to.isoformat() if ra.valid_to else None,
+                    "is_active": active,
+                }
+            )
+        return Response({"count": len(rows), "results": rows})
+
+    def post(self, request, user_id: int):
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return _bad("کاربر یافت نشد.", "NOT_FOUND", 404)
+        d = request.data if isinstance(request.data, dict) else {}
+        role_code = str(d.get("role_code") or "").strip()
+        if not role_code:
+            return _bad("کد نقش الزامی است.", "REQUIRED")
+        from .models import Role, RoleAssignment
+
+        try:
+            role = Role.objects.get(code=role_code)
+        except Role.DoesNotExist:
+            return _bad("نقش نامعتبر است.", "INVALID_ROLE")
+        branch = None
+        if d.get("branch_id") not in (None, "", "null"):
+            try:
+                branch = Branch.objects.get(pk=int(d.get("branch_id")))
+            except (Branch.DoesNotExist, TypeError, ValueError):
+                return _bad("شعبهٔ انتخابی یافت نشد.", "NOT_FOUND", 404)
+        valid_from = timezone.localdate()
+        if d.get("valid_from"):
+            try:
+                valid_from = _parse_date(d.get("valid_from"))
+            except ValueError:
+                return _bad("تاریخ شروع نامعتبر است.", "INVALID_DATE")
+        duplicate = user.role_assignments.filter(
+            role=role, branch=branch, valid_from=valid_from
+        ).exists()
+        if duplicate:
+            return _bad("این نقش با همین شعبه و تاریخ قبلاً تخصیص یافته است.", "DUPLICATE")
+        ra = RoleAssignment.objects.create(
+            user=user, role=role, branch=branch, valid_from=valid_from, assigned_by=request.user
+        )
+        return Response(
+            {
+                "id": ra.id,
+                "role_code": role.code,
+                "role_name": role.name,
+                "branch_id": ra.branch_id,
+                "branch_code": branch.code if branch else None,
+                "valid_from": ra.valid_from.isoformat(),
+                "detail": f"نقش «{role.name}» به {user.username} تخصیص یافت.",
+            },
+            status=201,
+        )
+
+    def delete(self, request, user_id: int):
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return _bad("کاربر یافت نشد.", "NOT_FOUND", 404)
+        assignment_id = request.query_params.get("assignment_id")
+        if not assignment_id:
+            return _bad("assignment_id الزامی است.", "REQUIRED")
+        from .models import RoleAssignment
+
+        try:
+            ra = user.role_assignments.get(pk=int(assignment_id))
+        except (RoleAssignment.DoesNotExist, TypeError, ValueError):
+            return _bad("تخصیص نقش یافت نشد.", "NOT_FOUND", 404)
+        today = timezone.localdate()
+        if ra.valid_from >= today:
+            # تخصیص امروز یا آینده — حذف کامل (قید بازه اجازهٔ valid_to=دیروز نمی‌دهد)
+            ra.delete()
+            return Response({"detail": "تخصیص نقش حذف شد.", "removed": True})
+        ra.valid_to = today - dt.timedelta(days=1)
+        ra.save(update_fields=["valid_to", "updated_at"])
+        return Response({"detail": "نقش از امروز پایان یافت.", "removed": False})
+
+
 class ManagementPersonnelImportAccounts(APIView):
     """POST /api/v1/management/personnel/import-accounts/ — ورود گروهی اکسل + ساخت حساب.
 
-    multipart: file (xlsx) و dry_run (اختیاری). نام کاربری = کد ملی،
-    گذرواژه = شماره موبایل؛ دسترسی هم‌ارز بقیهٔ صفحات مدیریت (HR/ADMIN/superuser).
+    multipart: file (xlsx)، dry_run، sheet (نام/شمارهٔ کاربرگ) و job_title (اختیاری).
+    نام کاربری = کد ملی، گذرواژه = شماره موبایل؛ دسترسی هم‌ارز بقیهٔ صفحات مدیریت
+    (HR/ADMIN/superuser).
     """
 
     permission_classes = [IsAuthenticated, IsPeopleManager]
@@ -381,11 +501,31 @@ class ManagementPersonnelImportAccounts(APIView):
             return _bad("فایل xlsx الزامی است.", "INVALID")
         dry_run = str(request.data.get("dry_run", "")).lower() in ("1", "true", "yes")
         job_title = str(request.data.get("job_title") or "مشاور").strip()[:120] or "مشاور"
+        sheet = str(request.data.get("sheet") or "").strip()
         try:
-            report = import_accounts(upload.read(), dry_run=dry_run, job_title=job_title)
+            report = import_accounts(
+                upload.read(), dry_run=dry_run, job_title=job_title, sheet=sheet
+            )
         except AccountImportFormatError as exc:
             return _bad(str(exc), "INVALID_FORMAT")
         return Response(report)
+
+
+class ManagementPersonnelImportAccountsInspect(APIView):
+    """POST /api/v1/management/personnel/import-accounts/inspect/ — فهرست کاربرگ‌های فایل."""
+
+    permission_classes = [IsAuthenticated, IsPeopleManager]
+    throttle_scope = "import"
+
+    def post(self, request):
+        upload = request.FILES.get("file")
+        if upload is None:
+            return _bad("فایل xlsx الزامی است.", "INVALID")
+        try:
+            sheets = inspect_workbook(upload.read())
+        except AccountImportFormatError as exc:
+            return _bad(str(exc), "INVALID_FORMAT")
+        return Response({"sheets": sheets})
 
 
 class ManagementSeedDemoView(APIView):

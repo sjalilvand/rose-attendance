@@ -52,6 +52,11 @@ class AttendanceEvent(TimeStampedModel):
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     location_accuracy_m = models.FloatField(null=True, blank=True)
+    location_distance_m = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="فاصلهٔ لحظهٔ تردد تا مرکز شعبه به متر (هورساین)؛ بدون مختصات یا شعبهٔ بدون مرکز تهی است",
+    )
     location_fixed_at = models.DateTimeField(null=True, blank=True)
     location_status = models.CharField(
         max_length=15,

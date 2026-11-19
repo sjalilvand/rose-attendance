@@ -8,6 +8,7 @@ import { startNotifications, stopNotifications, type LiveNotification } from '..
 import { initials, roleFa } from '../lib/roles'
 
 const MANAGER_ROLES = ['BRANCH_MANAGER', 'REGION_MANAGER', 'HR', 'ADMIN']
+const MONITORING_ROLES = ['BRANCH_MANAGER', 'REGION_MANAGER', 'HR', 'ADMIN', 'AUDITOR']
 const HR_ROLES = ['HR', 'ADMIN']
 
 interface Tab {
@@ -22,6 +23,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth()
   const isManager = Boolean(me && me.roles.some((role) => MANAGER_ROLES.includes(role)))
   const isHrAdmin = Boolean(me && me.roles.some((role) => HR_ROLES.includes(role)))
+  const canMonitor = Boolean(me && me.roles.some((role) => MONITORING_ROLES.includes(role)))
   const [toast, setToast] = useState<LiveNotification | null>(null)
   const [badge, setBadge] = useState<UnreadBadge>({ messages: 0, notifications: 0 })
   const timer = useRef<number | undefined>(undefined)
@@ -61,6 +63,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { to: '/messages', label: 'پیام', icon: '💬', badge: badge.messages },
     { to: '/notifications', label: 'اعلان', icon: '🔔', badge: badge.notifications },
     ...(isManager ? [{ to: '/approvals', label: 'رسیدگی', icon: '✅' } satisfies Tab] : []),
+    ...(canMonitor ? [{ to: '/monitoring', label: 'مانیتورینگ', icon: '📡' } satisfies Tab] : []),
     ...(isHrAdmin ? [{ to: '/org', label: 'سازمان', icon: '🏢' } satisfies Tab] : []),
     ...(isHrAdmin ? [{ to: '/import', label: 'ورود گروهی', icon: '📥' } satisfies Tab] : []),
     ...(isHrAdmin ? [{ to: '/reports', label: 'گزارش‌ها', icon: '📑' } satisfies Tab] : []),

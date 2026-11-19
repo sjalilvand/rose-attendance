@@ -10,6 +10,7 @@ from apps.attendance.api import (
     OvertimeProposalViewSet,
     ReviewQueueViewSet,
 )
+from apps.attendance.monitoring import MonitoringDashboardView
 from apps.leaves.api import (
     LeaveLedgerViewSet,
     LeaveTypeViewSet,
@@ -23,9 +24,12 @@ from apps.people.management_api import (
     ManagementPersonnelCreateUserView,
     ManagementPersonnelDetail,
     ManagementPersonnelImportAccounts,
+    ManagementPersonnelImportAccountsInspect,
     ManagementPersonnelListCreate,
+    ManagementRolesList,
     ManagementSeedDemoView,
     ManagementUserDetail,
+    ManagementUserRoles,
     ManagementUserSetPassword,
     ManagementUsersList,
 )
@@ -107,6 +111,10 @@ api_v1 = [
     path("management/users/<int:user_id>/", ManagementUserDetail.as_view(), name="mgmt-user-detail"),
     path("management/users/<int:user_id>/set-password/", ManagementUserSetPassword.as_view(), name="mgmt-user-password"),
     path("management/personnel/import-accounts/", ManagementPersonnelImportAccounts.as_view(), name="mgmt-personnel-import-accounts"),
+    path("management/personnel/import-accounts/inspect/", ManagementPersonnelImportAccountsInspect.as_view(), name="mgmt-personnel-import-accounts-inspect"),
+    path("management/roles/", ManagementRolesList.as_view(), name="mgmt-roles"),
+    path("management/users/<int:user_id>/roles/", ManagementUserRoles.as_view(), name="mgmt-user-roles"),
+    path("monitoring/dashboard/", MonitoringDashboardView.as_view(), name="monitoring-dashboard"),
     path("management/seed-demo/", ManagementSeedDemoView.as_view(), name="mgmt-seed-demo"),
 ]
 

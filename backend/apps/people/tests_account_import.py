@@ -13,6 +13,7 @@ from openpyxl import Workbook
 from rest_framework.test import APIClient
 
 from apps.orgs.models import Branch, Region
+from apps.people.account_importer import import_accounts
 from apps.people.models import Employee, User
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -202,3 +203,57 @@ class ImportAccountsCommandTests(TestCase):
 
         with self.assertRaises(CommandError):
             call_command("import_accounts_excel", "/tmp/no-such-file.xlsx")
+
+
+class ImportSheetsTests(TestCase):
+    """چندکاربرگی — inspect و انتخاب کاربرگ با نام/شماره."""
+
+    def setUp(self):
+        cache.clear()
+        make_branch()
+
+    def _two_sheet_workbook(self) -> bytes:
+        wb = Workbook()
+        ws1 = wb.active
+        ws1.title = "مدیران کلینیک"
+        ws1.append(HEADER)
+        ws1.append(["تهران", "هادی پرگیر", "901", "0057375437", "09122139752"])
+        ws2 = wb.create_sheet("مسئولین اجرایی")
+        ws2.append(HEADER)
+        ws2.append(["قم", "حوا غنیمی", "902", "1753754501", "09129339204"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def test_inspect_lists_sheets(self):
+        from apps.people.account_importer import inspect_workbook
+
+        sheets = inspect_workbook(self._two_sheet_workbook())
+        self.assertEqual([s["name"] for s in sheets], ["مدیران کلینیک", "مسئولین اجرایی"])
+        self.assertEqual(sheets[0]["rows"], 2)  # سرستون + ۱ ردیف
+        self.assertEqual(sheets[1]["rows"], 2)
+
+    def test_import_second_sheet_by_name_and_job_title(self):
+        client, _ = make_admin_client()
+        report = import_accounts(
+            self._two_sheet_workbook(), dry_run=False,
+            job_title="مسئول اجرایی", sheet="مسئولین اجرایی",
+        )
+        self.assertEqual(report["created"], 1)
+        self.assertEqual(report["sheet"], "مسئولین اجرایی")
+        user = User.objects.get(username="1753754501")
+        self.assertEqual(user.employee.job_title, "مسئول اجرایی")
+        self.assertFalse(User.objects.filter(username="0057375437").exists())
+
+    def test_import_sheet_by_number(self):
+        client, _ = make_admin_client()
+        report = import_accounts(self._two_sheet_workbook(), dry_run=True, sheet="1")
+        self.assertEqual(report["created"], 1)
+        self.assertEqual(report["sheet"], "مدیران کلینیک")
+
+    def test_import_missing_sheet_rejected(self):
+        client, _ = make_admin_client()
+        from apps.people.account_importer import AccountImportFormatError
+
+        with self.assertRaises(AccountImportFormatError):
+            import_accounts(self._two_sheet_workbook(), dry_run=True, sheet="ندارد")

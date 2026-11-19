@@ -102,6 +102,7 @@ def punch_response(event: AttendanceEvent, created: bool) -> dict:
         "event_status": event.event_status,
         "location_status": event.location_status,
         "location_reason": event.location_reason,
+        "location_distance_m": round(event.location_distance_m, 1) if event.location_distance_m is not None else None,
         "flags": event.flags,
         "effective_time": event.effective_time,
         "device_time": event.device_time,
@@ -189,6 +190,7 @@ class AttendanceEventViewSet(
                 "connection_mode": e.connection_mode,
                 "location_status": e.location_status,
                 "location_reason": e.location_reason,
+                        "location_distance_m": round(e.location_distance_m, 1) if e.location_distance_m is not None else None,
                 "event_status": e.event_status,
                 "flags": e.flags,
             }
@@ -471,6 +473,7 @@ class DailyBoardViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                         "effective_time": e.effective_time,
                         "location_status": e.location_status,
                         "location_reason": e.location_reason,
+                        "location_distance_m": round(e.location_distance_m, 1) if e.location_distance_m is not None else None,
                         "event_status": e.event_status,
                         "flags": e.flags,
                         "connection_mode": e.connection_mode,

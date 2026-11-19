@@ -905,3 +905,20 @@ details > summary { cursor: pointer; }
 @media (max-width: 480px) {
   .user-meta strong, .user-meta small { max-width: 96px; }
 }
+
+/* مانیتورینگ دسکتاپ و نقشهٔ ژئوفنس */
+.page.wide {
+  max-width: 1200px;
+  margin-inline: auto;
+}
+
+.geo-map {
+  height: 340px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #d4d4d8);
+  overflow: hidden;
+}
+
+.kpi-chips .chip {
+  font-size: 0.92rem;
+}
