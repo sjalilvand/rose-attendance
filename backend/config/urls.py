@@ -19,7 +19,7 @@ from apps.leaves.api import (
     RequestQueueViewSet,
     RequestsViewSet,
 )
-from apps.orgs.api import BranchViewSet, RegionViewSet
+from apps.orgs.api import BranchViewSet, HubBranchesExportView, RegionViewSet
 from apps.people.management_api import (
     ManagementPersonnelCreateUserView,
     ManagementPersonnelDetail,
