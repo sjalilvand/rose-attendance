@@ -75,12 +75,31 @@ export default function Layout({ children }: { children: ReactNode }) {
   const mainRole = me?.roles.length ? roleFa(me.roles[0]) : ''
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div className="brand">
+      {/* سایدبار دسکتاپ (≥1024px) — روی موبایل مخفی است؛ درخواست کارفرما: منوی کنار و تمام‌صفحه */}
+      <aside className="side-nav">
+        <div className="side-brand">
           <span className="brand-mark" aria-hidden>✿</span>
-          <span className="brand-name">رز سفید</span>
+          <span>رز سفید</span>
         </div>
-        <div className="header-side">
+        <nav className="side-links" aria-label="ناوبری اصلی">
+          {tabs.map((tab) => (
+            <NavLink
+              key={tab.to}
+              to={tab.to}
+              end={tab.to === '/'}
+              className={({ isActive }) => `nav-tab${isActive ? ' active' : ''}`}
+            >
+              <span aria-hidden className="nav-icon">
+                {tab.icon}
+                {tab.badge != null && tab.badge > 0 && (
+                  <span className="nav-badge">{tab.badge > 99 ? '۹۹+' : faDigits(tab.badge)}</span>
+                )}
+              </span>
+              <span>{tab.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+        <div className="side-foot">
           {me && (
             <button
               className="user-chip"
@@ -92,10 +111,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <span className="avatar" aria-hidden>{initials(displayName)}</span>
               <span className="user-meta">
                 <strong>{displayName}</strong>
-                <small>
-                  {mainRole}
-                  {me.employee?.home_branch_name ? ` — ${me.employee.home_branch_name}` : ''}
-                </small>
+                <small>{mainRole}</small>
               </span>
             </button>
           )}
@@ -109,13 +125,50 @@ export default function Layout({ children }: { children: ReactNode }) {
             خروج
           </button>
         </div>
-      </header>
-      <main className="app-main">{children}</main>
-      {toast && (
-        <div className="toast" role="status">
-          <strong>{toast.title}</strong>
-        </div>
-      )}
+      </aside>
+      <div className="app-body">
+        <header className="app-header">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden>✿</span>
+            <span className="brand-name">رز سفید</span>
+          </div>
+          <div className="header-side">
+            {me && (
+              <button
+                className="user-chip"
+                title="مشاهدهٔ پروفایل"
+                onClick={() => {
+                  navigate('/profile')
+                }}
+              >
+                <span className="avatar" aria-hidden>{initials(displayName)}</span>
+                <span className="user-meta">
+                  <strong>{displayName}</strong>
+                  <small>
+                    {mainRole}
+                    {me.employee?.home_branch_name ? ` — ${me.employee.home_branch_name}` : ''}
+                  </small>
+                </span>
+              </button>
+            )}
+            <button
+              className="linklike"
+              onClick={() => {
+                logout()
+                navigate('/login', { replace: true })
+              }}
+            >
+              خروج
+            </button>
+          </div>
+        </header>
+        <main className="app-main">{children}</main>
+        {toast && (
+          <div className="toast" role="status">
+            <strong>{toast.title}</strong>
+          </div>
+        )}
+      </div>
       <nav className="bottom-nav" aria-label="ناوبری اصلی">
         {tabs.map((tab) => (
           <NavLink

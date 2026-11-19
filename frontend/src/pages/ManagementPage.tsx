@@ -360,7 +360,7 @@ export default function ManagementPage() {
   const orphans = users.filter((u) => u.employee === null)
 
   return (
-    <div className="page">
+    <div className="page wide">
       <section className="card">
         <div className="row between">
           <div className="h">مدیریت پرسنل و کاربران</div>

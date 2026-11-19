@@ -147,7 +147,7 @@ export default function OrgPage() {
     )
   }
   return (
-    <div className="page">
+    <div className="page wide">
       <h2 className="h">مدیریت سازمان</h2>
       <div className="tabs">
         {(Object.keys(TAB_LABELS) as Tab[]).map((key) => (
@@ -266,7 +266,7 @@ function BranchesTab() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<BulkReport | null>(null)
-  const [form, setForm] = useState({ code: '', name: '', region_code: '', province: '', city: '', geo_latitude: '', geo_longitude: '', geo_radius_m: '' })
+  const [form, setForm] = useState({ code: '', name: '', region_code: '', province: '', city: '', address: '', geo_latitude: '', geo_longitude: '', geo_radius_m: '' })
   const [editing, setEditing] = useState<OrgBranch | null>(null)
 
   const load = useCallback(async (p = page, s = search, r = regionFilter) => {
@@ -301,7 +301,7 @@ function BranchesTab() {
       if (form.geo_radius_m.trim()) geoFields.geo_radius_m = Number(form.geo_radius_m)
       await createBranch({ ...form, ...geoFields })
       setNotice(`شعبهٔ ${form.code} ساخته شد.`)
-      setForm({ code: '', name: '', region_code: form.region_code, province: '', city: '', geo_latitude: '', geo_longitude: '', geo_radius_m: '' })
+      setForm({ code: '', name: '', region_code: form.region_code, province: '', city: '', address: '', geo_latitude: '', geo_longitude: '', geo_radius_m: '' })
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ثبت شعبه ناموفق بود')
@@ -323,6 +323,7 @@ function BranchesTab() {
       ...(cells[5] ? { geo_latitude: Number(cells[5]) } : {}),
       ...(cells[6] ? { geo_longitude: Number(cells[6]) } : {}),
       ...(cells[7] ? { geo_radius_m: Number(cells[7]) } : {}),
+      ...(cells[8] ? { address: cells[8] } : {}),
     }))
     try {
       setReport(await bulkUpsertBranches(items, dryRun))
@@ -385,6 +386,10 @@ function BranchesTab() {
               <span>شعاع مجاز (متر)</span>
               <input value={form.geo_radius_m} onChange={(e) => setForm({ ...form, geo_radius_m: e.target.value })} inputMode="numeric" placeholder="150 تا ۱۰۰۰" dir="ltr" />
             </label>
+            <label className="field-row" style={{ gridColumn: '1 / -1' }}>
+              <span>نشانی (اختیاری)</span>
+              <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} maxLength={500} placeholder="خیابان، پلاک، طبقه…" />
+            </label>
           </div>
           <p className="hint">
             مختصات را می‌توانید بعداً با دکمهٔ «ویرایش» از روی نقشه تنظیم کنید — کلیک روی نقشه یا
@@ -419,6 +424,7 @@ function BranchesTab() {
               <th>نام</th>
               <th>منطقه</th>
               <th>شهر</th>
+              <th>نشانی</th>
               <th>مختصات</th>
               <th>شعاع</th>
               <th>پرسنل</th>
@@ -433,6 +439,9 @@ function BranchesTab() {
                 <td>{b.name}</td>
                 <td className="mono">{b.region_code}</td>
                 <td>{b.city || '—'}</td>
+                <td title={b.address} className="small" style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {b.address || '—'}
+                </td>
                 <td className="mono">
                   {b.geo_latitude != null && b.geo_longitude != null
                     ? `${b.geo_latitude.toFixed(5)}, ${b.geo_longitude.toFixed(5)}`
@@ -465,8 +474,8 @@ function BranchesTab() {
 
       <BulkCard
         label="شعب"
-        columnsHint="هر خط: کد، نام، کد منطقه، استان، شهر، عرض، طول، شعاع (متر) — ستون‌های بعد از کد منطقه اختیاری‌اند."
-        placeholder={'B101, شعبهٔ ولیعصر, R1, تهران, تهران\nB102, کلینیک سعادت‌آباد, R1, تهران, تهران, 35.7797, 51.3806, 300'}
+        columnsHint="هر خط: کد، نام، کد منطقه، استان، شهر، عرض، طول، شعاع (متر)، نشانی — ستون‌های بعد از کد منطقه اختیاری‌اند (نشانی بدون ویرگول لاتین)."
+        placeholder={'B101, شعبهٔ ولیعصر, R1, تهران, تهران\nB102, کلینیک سعادت‌آباد, R1, تهران, تهران, 35.7797, 51.3806, 300, خیابان سعادت‌آباد پلاک ۱۲'}
         busy={busy}
         report={report}
         keyName="code"

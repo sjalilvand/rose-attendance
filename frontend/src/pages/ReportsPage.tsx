@@ -207,7 +207,7 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page wide">
       <section className="card">
         <h1 className="h3">گزارش ماهانهٔ HR</h1>
         <p className="hint">

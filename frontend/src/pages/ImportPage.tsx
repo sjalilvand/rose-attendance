@@ -49,7 +49,7 @@ export default function ImportPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page wide">
       <section className="card">
         <h1 className="h3">ورود گروهی پرسنل</h1>
         <p className="hint">

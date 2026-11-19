@@ -59,7 +59,7 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page wide">
       <h2 className="h">رسیدگی</h2>
       <div className="tabs">
         {(Object.keys(TAB_LABELS) as Tab[]).map((key) => (

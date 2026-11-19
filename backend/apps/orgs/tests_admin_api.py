@@ -59,7 +59,8 @@ class BranchPermissionTests(TestCase):
 
     def test_read_open_to_any_authenticated_user(self):
         self.client.force_authenticate(self.user)
-        res = self.client.get("/api/v1/org/branches/")
+        # فیلتر منطقه — مهاجرت 0003 سی‌ویک کلینیک RD-* می‌کارد؛ فقط R1 شمرده می‌شود
+        res = self.client.get("/api/v1/org/branches/?region=R1")
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(res.data["count"], 1)
         row = res.data["results"][0]
