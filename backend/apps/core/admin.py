@@ -137,3 +137,9 @@ class CleanupRunAdmin(admin.ModelAdmin):
 admin.site.register(EmployeeBranchAssignment)
 admin.site.register(Message)
 admin.site.register(Notification)
+
+# برچسب واضح برای پنل جنگو: اینجا پنل اضطراری داده‌هاست، نه پنل اصلی سامانه
+# (پنل اصلی داخل PWA است — بنر راهنما در templates/admin/base_site.html).
+admin.site.site_header = "رز سفید — پنل مدیریت داده (جنگو)"
+admin.site.site_title = "رز سفید"
+admin.site.index_title = "مدیریت اضطراری داده‌ها"
